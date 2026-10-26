@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Hyvä Themes B.V. All rights reserved.
+ * See LICENSE.md for the terms.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
+    <event name="sales_order_save_after">
+        <observer name="hyva_inventory_order_reservation_record" instance="Hyva\InventoryOrderReservation\Observer\RecordObligationObserver"/>
+    </event>
+    <event name="sales_order_save_commit_after">
+        <observer name="hyva_inventory_order_reservation_register" instance="Hyva\InventoryOrderReservation\Observer\RegisterAfterCommitObserver"/>
+    </event>
+</config>

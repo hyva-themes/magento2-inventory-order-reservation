@@ -1,0 +1,92 @@
+<?php
+/**
+ * Copyright © Hyvä Themes B.V. All rights reserved.
+ * See LICENSE.md for the terms.
+ */
+
+declare(strict_types=1);
+
+namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
+
+use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Obligation;
+use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
+use Hyva\InventoryOrderReservation\Model\StockRegistration;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Sales\Api\Data\OrderInterface;
+use Magento\Sales\Api\OrderRepositoryInterface;
+use Magento\Sales\Model\OrderMutexInterface;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+
+class StockRegistrationTest extends TestCase
+{
+    public function test_an_owed_order_is_registered_once_under_the_lock_and_marked_done(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('forOrder')->with(9)->willReturn([$owed]);
+        $resource->method('isOneConnection')->willReturn(true);
+        $resource->expects(self::once())->method('markDone')->with(9, Obligation::SETTLED_BY_REGISTRATION);
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::once())->method('register')->with(self::isInstanceOf(OrderInterface::class), [$owed]);
+        $registration = $this->registration($resource, $handler, locked: true);
+
+        self::assertTrue($registration->register(9));
+    }
+
+    public function test_nothing_owed_means_nothing_written(): void
+    {
+        $done = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY, Obligation::STATUS_DONE);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('forOrder')->willReturn([$done]);
+        $resource->expects(self::never())->method('markDone');
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        self::assertFalse($this->registration($resource, $handler, locked: true)->register(9));
+    }
+
+    public function test_a_handler_failure_records_the_attempt_and_leaves_the_obligation_owed(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('forOrder')->willReturn([$owed]);
+        $resource->method('isOneConnection')->willReturn(true);
+        $resource->expects(self::never())->method('markDone');
+        $resource->expects(self::once())->method('recordFailure')->with(9, 'Inventory refused');
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->method('register')->willThrowException(new LocalizedException(__('Inventory refused')));
+
+        $this->expectException(LocalizedException::class);
+        $this->registration($resource, $handler, locked: true)->register(9);
+    }
+
+    public function test_two_connections_refuse_the_step(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('forOrder')->willReturn([$owed]);
+        $resource->method('isOneConnection')->willReturn(false);
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        $this->expectExceptionMessage('one database connection');
+        $this->registration($resource, $handler, locked: true)->register(9);
+    }
+
+    private function registration(ObligationResource $resource, HandlerInterface $handler, bool $locked): StockRegistration
+    {
+        $mutex = $this->createMock(OrderMutexInterface::class);
+        $mutex->method('execute')->willReturnCallback(static fn (int $orderId, callable $callable, array $args) => $callable(...$args));
+        $orders = $this->createMock(OrderRepositoryInterface::class);
+        $orders->method('get')->willReturn($this->createMock(OrderInterface::class));
+        return new StockRegistration(
+            $mutex,
+            $resource,
+            $orders,
+            $this->createMock(LoggerInterface::class),
+            [Obligation::MODE_INVENTORY => $handler]
+        );
+    }
+}

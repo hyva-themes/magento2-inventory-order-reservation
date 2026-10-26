@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Hyvä Themes B.V. All rights reserved.
+ * See LICENSE.md for the terms.
+ */
+-->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Webapi:etc/webapi.xsd">
+    <!-- A client that will send reserve_stock asks first whether the
+         store accepts it: an undeclared extension attribute is refused by
+         input validation, so a client needs to know before it posts. -->
+    <route url="/V1/inventory/order-reservation" method="GET">
+        <service class="Hyva\InventoryOrderReservation\Api\CapabilitiesInterface" method="get"/>
+        <resources>
+            <resource ref="Hyva_InventoryOrderReservation::capabilities"/>
+        </resources>
+    </route>
+</routes>

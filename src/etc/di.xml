@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Hyvä Themes B.V. All rights reserved.
+ * See LICENSE.md for the terms.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <preference for="Hyva\InventoryOrderReservation\Api\StockRegistrationInterface" type="Hyva\InventoryOrderReservation\Model\StockRegistration"/>
+    <preference for="Hyva\InventoryOrderReservation\Api\CapabilitiesInterface" type="Hyva\InventoryOrderReservation\Model\CapabilitiesService"/>
+    <preference for="Hyva\InventoryOrderReservation\Api\Data\CapabilitiesInterface" type="Hyva\InventoryOrderReservation\Model\Data\Capabilities"/>
+    <!-- One handler per store mode; the registration picks by the obligation's mode. -->
+    <type name="Hyva\InventoryOrderReservation\Model\StockRegistration">
+        <arguments>
+            <argument name="handlers" xsi:type="array">
+                <item name="inventory" xsi:type="object">Hyva\InventoryOrderReservation\Model\Handler\InventoryHandler</item>
+                <item name="legacy" xsi:type="object">Hyva\InventoryOrderReservation\Model\Handler\LegacyHandler</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\Framework\Console\CommandList">
+        <arguments>
+            <argument name="commands" xsi:type="array">
+                <item name="hyva_inventory_order_reservation_list" xsi:type="object">Hyva\InventoryOrderReservation\Console\Command\ListOwedCommand</item>
+                <item name="hyva_inventory_order_reservation_run" xsi:type="object">Hyva\InventoryOrderReservation\Console\Command\RunOwedCommand</item>
+            </argument>
+        </arguments>
+    </type>
+    <!-- Magento's repair tools, coordinated: a manual compensation naming an
+         order this module owes completes the registration first and is read
+         against what remains; the listing leaves owed orders out; the
+         command reports what happened per row. Plugins on Inventory types
+         are only ever built where those types exist. -->
+    <type name="Magento\InventoryReservationsApi\Model\AppendReservationsInterface">
+        <plugin name="hyva_inventory_order_reservation_coordinate_manual_compensation"
+                type="Hyva\InventoryOrderReservation\Plugin\Inventory\CoordinateManualCompensationPlugin"
+                sortOrder="10"/>
+    </type>
+    <type name="Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies">
+        <plugin name="hyva_inventory_order_reservation_leave_owed_out"
+                type="Hyva\InventoryOrderReservation\Plugin\Inventory\LeaveOwedOrdersOutOfInconsistenciesPlugin"
+                sortOrder="10"/>
+    </type>
+    <type name="Magento\InventoryReservationCli\Command\CreateCompensations">
+        <plugin name="hyva_inventory_order_reservation_report_compensations"
+                type="Hyva\InventoryOrderReservation\Plugin\Console\ReportCompensationsPlugin"
+                sortOrder="10"/>
+    </type>
+</config>

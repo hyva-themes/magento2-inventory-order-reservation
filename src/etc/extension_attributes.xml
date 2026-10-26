@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © Hyvä Themes B.V. All rights reserved.
+ * See LICENSE.md for the terms.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Api/etc/extension_attributes.xsd">
+    <!-- The one request this module answers: an order created through the
+         order repository asks for the stock side of a placed order. Absent
+         by default, so the repository behaves as it always has. -->
+    <extension_attributes for="Magento\Sales\Api\Data\OrderInterface">
+        <attribute code="reserve_stock" type="boolean"/>
+    </extension_attributes>
+</config>

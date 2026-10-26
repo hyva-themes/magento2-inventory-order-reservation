@@ -1,0 +1,34 @@
+{
+    "name": "hyva-themes/magento2-inventory-order-reservation",
+    "description": "Gives an order created through Magento's order API the stock side of a placed order: the Inventory reservation, or the legacy stock deduction, on request, with recovery and a coordinated repair path.",
+    "type": "magento2-module",
+    "license": ["OSL-3.0", "AFL-3.0"],
+    "keywords": ["magento2", "inventory", "msi", "reservation", "rest-api", "orders"],
+    "authors": [
+        {
+            "name": "Hyvä Themes B.V.",
+            "homepage": "https://hyva.io"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "magento/framework": "*",
+        "magento/module-sales": "*",
+        "magento/module-catalog-inventory": "*",
+        "magento/module-store": "*"
+    },
+    "suggest": {
+        "magento/module-inventory-sales": "With Magento Inventory the module places the order's reservation; without it, it deducts the legacy stock item."
+    },
+    "autoload": {
+        "files": ["src/registration.php"],
+        "psr-4": {
+            "Hyva\\InventoryOrderReservation\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hyva\\InventoryOrderReservation\\Test\\Unit\\": "tests/unit/"
+        }
+    }
+}

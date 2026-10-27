@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -28,10 +28,6 @@ use Magento\Sales\Api\Data\OrderInterface;
  */
 class RecordObligationObserver implements ObserverInterface
 {
-    /**
-     * Constructor.
-     * @param ObligationRecorder $recorder
-     */
     public function __construct(
         private readonly ObligationRecorder $recorder
     ) {
@@ -39,8 +35,6 @@ class RecordObligationObserver implements ObserverInterface
 
     /**
      * Records the obligation of a new order that asks for it; every other save passes.
-     * @param Observer $observer
-     * @return void
      */
     public function execute(Observer $observer): void
     {
@@ -55,11 +49,13 @@ class RecordObligationObserver implements ObserverInterface
     }
 
     /**
-     * An order without original data: inserted by this request, by this
-     * save or an earlier one of the same object.
+     * An order the save before marked as new (MarkNewOrderObserver): it had
+     * no id when the save began. An order the API builds for an update
+     * carries its id from the payload and no original data, so original
+     * data cannot tell the two apart.
      */
     private function isNew(OrderInterface $order): bool
     {
-        return method_exists($order, 'getOrigData') && $order->getOrigData('entity_id') === null;
+        return method_exists($order, 'getData') && (bool) $order->getData(MarkNewOrderObserver::NEW_ORDER);
     }
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<ruleset name="Hyva_Pos">
+<ruleset name="Hyva_InventoryOrderReservation">
     <description>HyvaThemes coding standard for the Hyva_Pos Magento module.</description>
 
     <rule ref="HyvaThemes"/>

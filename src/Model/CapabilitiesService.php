@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -20,11 +20,6 @@ class CapabilitiesService implements CapabilitiesInterface
      */
     public const VERSION = '1.0.0';
 
-    /**
-     * Constructor.
-     * @param CapabilitiesFactory $capabilitiesFactory
-     * @param OptionalInventory $inventory
-     */
     public function __construct(
         private readonly CapabilitiesFactory $capabilitiesFactory,
         private readonly OptionalInventory $inventory
@@ -34,7 +29,6 @@ class CapabilitiesService implements CapabilitiesInterface
     /**
      * The module's version, the store's mode and the attribute to send.
      *
-     * @return Capabilities
      */
     public function get(): Capabilities
     {

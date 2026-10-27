@@ -1,13 +1,14 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Model;
 
+use Magento\Framework\Module\Manager as ModuleManager;
 use Magento\Framework\ObjectManagerInterface;
 
 /**
@@ -33,13 +34,20 @@ class OptionalInventory
     private const MANAGEMENT_ALLOWED = \Magento\InventoryConfigurationApi\Model\IsSourceItemManagementAllowedForProductTypeInterface::class;
     private const APPEND_RESERVATIONS = \Magento\InventoryReservationsApi\Model\AppendReservationsInterface::class;
     private const REQUIRED_INTERFACE = \Magento\InventorySalesApi\Api\PlaceReservationsForSalesEventInterface::class;
+    /** The Inventory modules whose services this class asks for; Composer autoloads their classes whether they are enabled or not. */
+    private const REQUIRED_MODULES = [
+        'Magento_InventorySales',
+        'Magento_InventorySalesApi',
+        'Magento_InventoryReservationsApi',
+        'Magento_InventoryCatalogApi',
+        'Magento_InventoryConfigurationApi',
+    ];
 
-    /**
-     * Constructor.
-     * @param ObjectManagerInterface $objectManager
-     */
+    private ?bool $installed = null;
+
     public function __construct(
-        private readonly ObjectManagerInterface $objectManager
+        private readonly ObjectManagerInterface $objectManager,
+        private readonly ModuleManager $moduleManager
     ) {
     }
 
@@ -47,9 +55,23 @@ class OptionalInventory
      * Whether this store has Magento Inventory. `interface_exists()`
      * autoloads, so it answers for the packages on disk.
      */
+    /**
+     * Whether Magento Inventory serves this store: its classes present and
+     * its modules enabled. A store that disabled the Inventory modules keeps
+     * their classes in Composer's autoloader, and asking the object manager
+     * for an interface no enabled module prefers ends in an \Error inside
+     * the order's save.
+     */
     public function isInstalled(): bool
     {
-        return interface_exists(self::REQUIRED_INTERFACE);
+        if ($this->installed === null) {
+            $this->installed = interface_exists(self::REQUIRED_INTERFACE);
+            foreach (self::REQUIRED_MODULES as $module) {
+                $this->installed = $this->installed && $this->moduleManager->isEnabled($module);
+            }
+        }
+
+        return $this->installed;
     }
 
     /** @return \Magento\InventorySalesApi\Api\PlaceReservationsForSalesEventInterface|null */
@@ -86,7 +108,6 @@ class OptionalInventory
      * Inventory's low-level reservation writer, for the coordinated
      * compensation alone (a business event goes through
      * placeReservationsForSalesEvent, as Adobe's documentation says).
-     * @return \Magento\InventoryReservationsApi\Model\AppendReservationsInterface|null
      */
     public function appendReservations(): ?object
     {
@@ -100,7 +121,6 @@ class OptionalInventory
     }
     /**
      * The compensation command's reader of its standard input, present with Magento_InventoryReservationCli.
-     * @return \Magento\InventoryReservationCli\Command\Input\GetCommandlineStandardInput|null
      */
     public function compensationStandardInput(): ?object
     {
@@ -109,7 +129,6 @@ class OptionalInventory
 
     /**
      * The compensation command's parser of one argument into a reservation, present with Magento_InventoryReservationCli.
-     * @return \Magento\InventoryReservationCli\Command\Input\GetReservationFromCompensationArgument|null
      */
     public function compensationArgumentReader(): ?object
     {
@@ -118,6 +137,11 @@ class OptionalInventory
 
 
     /** @return \Magento\InventoryCatalogApi\Model\GetProductTypesBySkusInterface|null */
+    public function stockItemConfiguration(): ?object
+    {
+        return $this->service(\Magento\InventoryConfigurationApi\Api\GetStockItemConfigurationInterface::class);
+    }
+
     public function productTypesBySkus(): ?object
     {
         return $this->service(self::PRODUCT_TYPES_BY_SKUS);
@@ -148,14 +172,17 @@ class OptionalInventory
 
     /**
      * The Inventory service, or null where the store has no Inventory or that service is missing.
-     * @param string $class
-     * @return object|null
      */
     private function service(string $class): ?object
     {
         if (!$this->isInstalled() || !(interface_exists($class) || class_exists($class))) {
             return null;
         }
-        return $this->objectManager->get($class);
+        try {
+            return $this->objectManager->get($class);
+        } catch (\Throwable) {
+            // an interface without a preference, a class whose module is off
+            return null;
+        }
     }
 }

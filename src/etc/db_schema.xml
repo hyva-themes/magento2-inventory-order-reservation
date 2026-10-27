@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <!--
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 -->
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
@@ -10,16 +10,17 @@
          ordered, per sku, and whether its stock side has been registered.
          Written in the order's own save; never rewritten by later edits to
          the order; the only record this module consults. -->
-    <table name="inventory_order_stock_registration" resource="default" engine="innodb" comment="Stock registration owed by orders created through the API">
+    <table name="hyva_inventory_order_stock_registration" resource="default" engine="innodb" onCreate="migrateDataFrom(inventory_order_stock_registration)" comment="Stock registration owed by orders created through the API">
         <column xsi:type="int" name="entity_id" unsigned="true" nullable="false" identity="true" comment="Entity ID"/>
         <column xsi:type="int" name="order_id" unsigned="true" nullable="false" comment="Order ID"/>
-        <column xsi:type="varchar" name="sku" nullable="false" length="64" comment="SKU"/>
+        <column xsi:type="int" name="product_id" unsigned="true" nullable="true" comment="Product ID the line was recorded for"/>
+        <column xsi:type="varchar" name="sku" nullable="false" length="255" comment="SKU"/>
         <column xsi:type="varchar" name="product_type" nullable="true" length="32" comment="Product type at creation"/>
         <column xsi:type="decimal" name="qty_ordered" scale="4" precision="12" unsigned="false" nullable="false" default="0" comment="Quantity ordered at creation"/>
         <column xsi:type="int" name="website_id" unsigned="true" nullable="false" default="0" comment="Website ID"/>
         <column xsi:type="int" name="stock_id" unsigned="true" nullable="true" comment="Inventory stock ID (null without Inventory)"/>
         <column xsi:type="varchar" name="mode" nullable="false" length="16" comment="inventory or legacy"/>
-        <column xsi:type="varchar" name="status" nullable="false" length="16" default="owed" comment="owed, done or refused"/>
+        <column xsi:type="varchar" name="status" nullable="false" length="16" default="owed" comment="owed, done or refused (given up after repeated failures)"/>
         <column xsi:type="varchar" name="settled_by" nullable="true" length="32" comment="registration, compensation"/>
         <column xsi:type="text" name="last_error" nullable="true" comment="The last failure, for the admin message"/>
         <column xsi:type="smallint" name="attempts" unsigned="true" nullable="false" default="0" comment="Attempts so far"/>
@@ -28,12 +29,12 @@
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="entity_id"/>
         </constraint>
-        <constraint xsi:type="foreign" referenceId="INVENTORY_ORDER_STOCK_REGISTRATION_ORDER_ID_SALES_ORDER_ENTITY_ID" table="inventory_order_stock_registration" column="order_id" referenceTable="sales_order" referenceColumn="entity_id" onDelete="CASCADE"/>
-        <constraint xsi:type="unique" referenceId="INVENTORY_ORDER_STOCK_REGISTRATION_ORDER_ID_SKU">
+        <constraint xsi:type="foreign" referenceId="HYVA_INVENTORY_ORDER_STOCK_REGISTRATION_ORDER_ID_SALES_ORDER_ENTITY_ID" table="hyva_inventory_order_stock_registration" column="order_id" referenceTable="sales_order" referenceColumn="entity_id" onDelete="CASCADE"/>
+        <constraint xsi:type="unique" referenceId="HYVA_INVENTORY_ORDER_STOCK_REGISTRATION_ORDER_ID_SKU">
             <column name="order_id"/>
             <column name="sku"/>
         </constraint>
-        <index referenceId="INVENTORY_ORDER_STOCK_REGISTRATION_STATUS_CREATED_AT" indexType="btree">
+        <index referenceId="HYVA_INVENTORY_ORDER_STOCK_REGISTRATION_STATUS_CREATED_AT" indexType="btree">
             <column name="status"/>
             <column name="created_at"/>
         </index>

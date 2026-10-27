@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -24,12 +24,6 @@ use Magento\InventoryReservationsApi\Model\AppendReservationsInterface;
  */
 class CoordinateManualCompensationPlugin
 {
-    /**
-     * Constructor.
-     * @param CoordinatedCompensation $coordinated
-     * @param ObligationResource $obligations
-     * @param SerializerInterface $serializer
-     */
     public function __construct(
         private readonly CoordinatedCompensation $coordinated,
         private readonly ObligationResource $obligations,
@@ -38,7 +32,6 @@ class CoordinateManualCompensationPlugin
     }
 
     /** @param AppendReservationsInterface $subject
-     * @param callable $proceed
      * @param array<int, object> $reservations
      * @throws CouldNotSaveException
      */
@@ -49,12 +42,22 @@ class CoordinateManualCompensationPlugin
             return;
         }
         $passThrough = [];
+        $coordinated = [];
         foreach ($reservations as $reservation) {
             $orderId = $this->coordinatedOrderId($reservation);
             if ($orderId === null) {
                 $passThrough[] = $reservation;
-                continue;
+            } else {
+                $coordinated[] = [$orderId, $reservation];
             }
+        }
+        // the rows this module has no say in go first, in one write; each
+        // coordinated row is then a whole write of its own under the order's
+        // lock, so a refusal leaves only complete writes behind it
+        if ($passThrough !== []) {
+            $proceed($passThrough);
+        }
+        foreach ($coordinated as [$orderId, $reservation]) {
             try {
                 $outcome = $this->coordinated->apply($orderId, $reservation);
             } catch (\Throwable $e) {
@@ -67,9 +70,6 @@ class CoordinateManualCompensationPlugin
             if ($outcome->isRefused()) {
                 throw new CouldNotSaveException(__('Compensation for order %1 %2', $orderId, $outcome->describe()));
             }
-        }
-        if ($passThrough !== []) {
-            $proceed($passThrough);
         }
     }
 

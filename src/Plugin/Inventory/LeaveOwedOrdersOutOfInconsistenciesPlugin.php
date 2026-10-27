@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -20,18 +20,12 @@ use Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies;
  */
 class LeaveOwedOrdersOutOfInconsistenciesPlugin
 {
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     */
     public function __construct(
         private readonly ObligationResource $obligations
     ) {
     }
 
     /** @param GetSalableQuantityInconsistencies $subject
-     * @param \Generator $result
-     * @return \Generator
      */
     public function afterExecute(GetSalableQuantityInconsistencies $subject, \Generator $result): \Generator
     {
@@ -49,8 +43,6 @@ class LeaveOwedOrdersOutOfInconsistenciesPlugin
 
     /**
      * Whether the inconsistency's order still owes its registration.
-     * @param object $inconsistency
-     * @return bool
      */
     private function isOwed(object $inconsistency): bool
     {

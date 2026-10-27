@@ -29,13 +29,13 @@ The route needs the ACL resource `Hyva_InventoryOrderReservation::capabilities`.
 
 ## How it stays exactly once
 
-The obligation is written with the order, in the order's own save: one row per sku with the quantity ordered at creation, the product type, the website and its stock, and the store's mode (`inventory_order_stock_registration`). Later edits to the order never change it. Registration runs after the order's transaction has committed, under Magento's own order lock (`OrderMutexInterface`: a transaction with `SELECT … FOR UPDATE` on the order row): the inventory write and the completion marker are in that one transaction, so a failure anywhere rolls both back and the obligation stays owed, and two runners for one order are serialised. That holds when the sales tables and the inventory tables share one database connection, which is every store since Magento removed the split database; the module checks it and refuses the step otherwise.
+The obligation is written with the order, in the order's own save: one row per sku with the quantity ordered at creation, the product type, the website and its stock, and the store's mode (`hyva_inventory_order_stock_registration`). Later edits to the order never change it. Registration runs after the order's transaction has committed, under Magento's own order lock (`OrderMutexInterface`: a transaction with `SELECT … FOR UPDATE` on the order row): the inventory write and the completion marker are in that one transaction, so a failure anywhere rolls both back and the obligation stays owed, and two runners for one order are serialized. That holds when the sales tables and the inventory tables share one database connection, which is every store since Magento removed the split database; the module checks it and refuses the step otherwise.
 
 Recovery has three triggers: the order's next save (an invoice or shipment brings one within seconds for most integrations), a cron every five minutes for obligations owed longer than two minutes, and `bin/magento inventory:order-reservation:run`. `bin/magento inventory:order-reservation:list` names what is owed and why the last attempt failed. Orders owed longer than an hour raise an admin system message.
 
 ## Magento's repair tools
 
-A manual compensation that names an order this module has an obligation for reaches a coordinated service, whichever code appends it (Magento's `inventory:reservation:create-compensations`, a store's own integration): under the order's lock, the order's owed registration completes first, then the request is read against what the order still owes by Magento's own rule (ordered less cancelled, refunded and shipped for an order in a non-final state; zero for a complete, closed or cancelled one). Already balanced: nothing is written and the command says so. The right amount, or part of it toward balance: written, with the remainder reported. The wrong direction, more than remains, or a sku the order owes nothing on: refused with the current discrepancy, and the command exits non-zero. `inventory:reservation:list-inconsistencies` leaves orders this module still owes out of its listing; they are the module's to register. Reservation history that Magento's cleanup deletes is never read to decide whether registration ran; the module's own record is.
+A manual compensation that names an order this module has an obligation for reaches a coordinated service, whichever code appends it (Magento's `inventory:reservation:create-compensations`, a store's own integration): under the order's lock, the order's owed registration completes first, then the request is read against what the order still owes by Magento's own rule (ordered less canceled, refunded and shipped for an order in a non-final state; zero for a complete, closed or canceled one). Already balanced: nothing is written and the command says so. The right amount, or part of it toward balance: written, with the remainder reported. The wrong direction, more than remains, or a sku the order owes nothing on: refused with the current discrepancy, and the command exits non-zero. `inventory:reservation:list-inconsistencies` leaves orders this module still owes out of its listing; they are the module's to register. Reservation history that Magento's cleanup deletes is never read to decide whether registration ran; the module's own record is.
 
 ## Installing
 
@@ -48,7 +48,9 @@ No dependency on Magento Inventory: the module installs on a store without it an
 
 ## Without Magento Inventory
 
-On a store without Inventory the module registers the sale on the legacy stock item, as the checkout does (`StockManagement::registerProductsSale`). Everything that follows is Magento's own legacy behaviour: a cancellation returns the unit only when "Automatically Return Credit Memo Item to Stock" is on, a credit memo returns it only when asked to, a shipment moves nothing. A registration that runs after one of those events ends in the same place as a checkout-placed order would.
+On a store without Inventory the module registers the sale on the legacy stock item, as the checkout does (`StockManagement::registerProductsSale`). Everything that follows is Magento's own legacy behavior: a cancellation returns the unit only with "Display Out of Stock Products / can back in stock" on (`cataloginventory/options/can_back_in_stock`, what `CancelOrderItemObserver` reads; on by default), a credit memo returns it only when asked to, a shipment moves nothing. A registration that runs after one of those events ends in the same place as a checkout-placed order would.
+
+A line the stock item cannot cover (backorders off, the register sold the last units anyway) makes `registerProductsSale` refuse the whole sale, as it refuses the storefront checkout and not an admin order. The goods left the shop, so the module then deducts the line the way an admin order's is deducted, past zero, and the item reads out of stock. With Inventory the placement never refuses for quantity, so the two modes end in the same place.
 
 ## Working on the module
 
@@ -56,9 +58,9 @@ The module installs on a Magento with or without Inventory, and `setup:di:compil
 
 Unit tests (`phpunit.xml.dist`) run against a borrowed Magento vendor: `MAGENTO_VENDOR_PATH=/path/to/magento/vendor/autoload.php php phpunit-10.phar`. Integration tests (`phpunit.integration.xml.dist`) run inside a development store, booted through `app/bootstrap.php`: `MAGENTO_ROOT=/var/www/html php phpunit-10.phar -c phpunit.integration.xml.dist` from the module's directory under the store. They place orders for one sku (`bed-walnut-cane` in the Koti sample data) and put its stock back after every test.
 
-## Licence
+## License
 
-This package is dual-licensed under the Open Software License (OSL 3.0) and the Academic Free License (AFL 3.0). You may choose either licence.
+This package is dual-licensed under the Open Software License (OSL 3.0) and the Academic Free License (AFL 3.0). You may choose either license.
 
 - Copyright © 2026-present Hyvä Themes. All rights reserved.
 - OSL 3.0 text: `LICENSE.txt` or http://opensource.org/licenses/osl-3.0.php.

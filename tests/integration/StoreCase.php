@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -38,9 +38,15 @@ abstract class StoreCase extends TestCase
 
     protected static ObjectManagerInterface $objectManager;
 
-    /** @var array<string, float> source code => quantity before the tests */
+    /** A configurable in the Koti sample data and the child the composite cases sell. */
+    protected const CONFIGURABLE_SKU = 'bedding-linen';
+    protected const CHILD_SKU = 'bedding-linen-white';
+    /** The skus the base class puts back after every test. */
+    private const RESTORED_SKUS = [self::SKU, self::CHILD_SKU];
+    /** @var array<string, array<string, float>> sku => source code => quantity before the tests */
     private static array $sourceBaseline = [];
-    private static ?float $legacyBaseline = null;
+    /** @var array<string, float> sku => stock item quantity before the tests */
+    private static array $legacyBaseline = [];
 
     /**
      * Called by the bootstrap with the booted object manager.
@@ -182,6 +188,79 @@ abstract class StoreCase extends TestCase
         return self::$objectManager->get(OrderRepositoryInterface::class)->save($order);
     }
 
+    /**
+     * An order for a configurable, as the checkout writes it: the parent
+     * line carries the chosen child's sku and the quantities, the child
+     * line hangs under it with the same sku and the progress Magento
+     * never books on it. Registration records the child.
+     */
+    protected function placeConfigurableOrder(float $qty = 1.0, bool $reserveStock = true): OrderInterface
+    {
+        $price = 20.0;
+        /** @var Order $order */
+        $order = self::$objectManager->create(Order::class);
+        $order->setStoreId(1)
+            ->setState(Order::STATE_NEW)
+            ->setStatus('pending')
+            ->setCustomerIsGuest(true)
+            ->setCustomerGroupId(0)
+            ->setCustomerEmail('inventory-order-reservation@example.com')
+            ->setCustomerFirstname('Integration')
+            ->setCustomerLastname('Test')
+            ->setBaseCurrencyCode('EUR')->setOrderCurrencyCode('EUR')->setGlobalCurrencyCode('EUR')->setStoreCurrencyCode('EUR')
+            ->setSubtotal($price * $qty)->setBaseSubtotal($price * $qty)
+            ->setGrandTotal($price * $qty)->setBaseGrandTotal($price * $qty)
+            ->setTotalQtyOrdered($qty)
+            ->setShippingMethod('flatrate_flatrate')
+            ->setShippingDescription('Flat Rate');
+        /** @var Order\Item $parent */
+        $parent = self::$objectManager->create(Order\Item::class);
+        $parent->setProductId($this->productId(self::CONFIGURABLE_SKU))->setProductType('configurable')
+            ->setSku(self::CHILD_SKU)->setName(self::CONFIGURABLE_SKU)
+            ->setQtyOrdered($qty)->setPrice($price)->setBasePrice($price)
+            ->setRowTotal($price * $qty)->setBaseRowTotal($price * $qty)->setIsVirtual(0)->setStoreId(1)
+            ->setProductOptions(['simple_sku' => self::CHILD_SKU, 'simple_name' => self::CHILD_SKU]);
+        /** @var Order\Item $child */
+        $child = self::$objectManager->create(Order\Item::class);
+        $child->setProductId($this->productId(self::CHILD_SKU))->setProductType('simple')
+            ->setSku(self::CHILD_SKU)->setName(self::CHILD_SKU)
+            ->setQtyOrdered($qty)->setPrice(0.0)->setBasePrice(0.0)
+            ->setRowTotal(0.0)->setBaseRowTotal(0.0)->setIsVirtual(0)->setStoreId(1)
+            ->setParentItem($parent);
+        $order->addItem($parent);
+        $order->addItem($child);
+        foreach (['billing', 'shipping'] as $type) {
+            /** @var Order\Address $address */
+            $address = self::$objectManager->create(Order\Address::class);
+            $address->setAddressType($type)->setFirstname('Integration')->setLastname('Test')
+                ->setStreet('Teststraat 1')->setCity('Heerlen')->setPostcode('6411AA')->setCountryId('NL')
+                ->setTelephone('0000000000')->setEmail('inventory-order-reservation@example.com');
+            $type === 'billing' ? $order->setBillingAddress($address) : $order->setShippingAddress($address);
+        }
+        /** @var Order\Payment $payment */
+        $payment = self::$objectManager->create(Order\Payment::class);
+        $payment->setMethod('checkmo');
+        $order->setPayment($payment);
+        if ($reserveStock) {
+            $extension = $order->getExtensionAttributes() ?? self::$objectManager->get(OrderExtensionFactory::class)->create();
+            $extension->setReserveStock(true);
+            $order->setExtensionAttributes($extension);
+        }
+        return self::$objectManager->get(OrderRepositoryInterface::class)->save($order);
+    }
+
+    /**
+     * The order's parent line of a configurable: the line a shipment names.
+     */
+    protected function parentItemId(int $orderId): int
+    {
+        $connection = $this->connection();
+        return (int) $connection->fetchOne(
+            $connection->select()->from($this->table('sales_order_item'), ['item_id'])
+                ->where('order_id = ?', $orderId)->where('parent_item_id IS NULL')->where('product_type = ?', 'configurable')
+        );
+    }
+
     protected function order(int $orderId): OrderInterface
     {
         return self::$objectManager->get(OrderRepositoryInterface::class)->get($orderId);
@@ -195,8 +274,18 @@ abstract class StoreCase extends TestCase
         );
     }
 
-    protected function ship(int $orderId, ?string $sourceCode = null): int
+    /**
+     * @param array<int, float> $items order item id => quantity; empty ships everything
+     */
+    protected function ship(int $orderId, ?string $sourceCode = null, array $items = []): int
     {
+        $lines = [];
+        foreach ($items as $itemId => $itemQty) {
+            /** @var \Magento\Sales\Api\Data\ShipmentItemCreationInterface $line */
+            $line = self::$objectManager->create(\Magento\Sales\Api\Data\ShipmentItemCreationInterface::class);
+            $line->setOrderItemId((int) $itemId)->setQty((float) $itemQty);
+            $lines[] = $line;
+        }
         $arguments = self::$objectManager->create(\Magento\Sales\Api\Data\ShipmentCreationArgumentsInterface::class);
         if ($sourceCode !== null) {
             // extension attributes come from their generated factory, as the REST layer builds them
@@ -205,7 +294,7 @@ abstract class StoreCase extends TestCase
             $arguments->setExtensionAttributes($extension);
         }
         return (int) self::$objectManager->get(ShipOrderInterface::class)
-            ->execute($orderId, [], false, false, null, [], [], $arguments);
+            ->execute($orderId, $lines, false, false, null, [], [], $arguments);
     }
 
     protected function cancel(int $orderId): void
@@ -261,7 +350,7 @@ abstract class StoreCase extends TestCase
      * An owed obligation written by hand: an order whose registration never
      * ran, the state a failed registration leaves.
      */
-    protected function insertOwed(int $orderId, float $qty, string $sku = self::SKU): void
+    protected function insertOwed(int $orderId, float $qty, string $sku = self::SKU, ?string $mode = null): void
     {
         $inventory = $this->inventoryInstalled();
         self::$objectManager->get(ObligationResource::class)->insert([
@@ -272,9 +361,51 @@ abstract class StoreCase extends TestCase
                 $qty,
                 1,
                 $inventory ? $this->websiteStockId() : null,
-                $inventory ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY
+                $mode ?? $this->storeMode()
             ),
         ]);
+    }
+
+    /**
+     * The mode this store registers in.
+     */
+    protected function storeMode(): string
+    {
+        return $this->inventoryInstalled() ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY;
+    }
+
+    /**
+     * An owed obligation no handler can take: every registration attempt
+     * the order's saves make fails and leaves it owed, which is the state
+     * a store in trouble leaves while the order is shipped, canceled or
+     * refunded. `releaseRegistration` gives it its mode back.
+     */
+    protected const MODE_HELD = 'held';
+
+    protected function insertHeld(int $orderId, float $qty, string $sku = self::SKU): void
+    {
+        $this->insertOwed($orderId, $qty, $sku, self::MODE_HELD);
+    }
+
+    protected function releaseRegistration(int $orderId): void
+    {
+        $this->connection()->update(
+            $this->table('hyva_inventory_order_stock_registration'),
+            ['mode' => $this->storeMode()],
+            ['order_id = ?' => $orderId, 'mode = ?' => self::MODE_HELD]
+        );
+    }
+
+    /**
+     * How often registration was attempted for the order's sku.
+     */
+    protected function obligationAttempts(int $orderId, string $sku = self::SKU): int
+    {
+        $connection = $this->connection();
+        return (int) $connection->fetchOne(
+            $connection->select()->from($this->table('hyva_inventory_order_stock_registration'), ['attempts'])
+                ->where('order_id = ?', $orderId)->where('sku = ?', $sku)
+        );
     }
 
     protected function register(int $orderId): bool
@@ -379,19 +510,22 @@ abstract class StoreCase extends TestCase
 
     private function readBaseline(): void
     {
-        if (self::$sourceBaseline !== [] || self::$legacyBaseline !== null) {
+        if (self::$legacyBaseline !== []) {
             return;
         }
         $connection = $this->connection();
-        if ($this->inventoryInstalled()) {
-            $rows = $connection->fetchPairs(
-                $connection->select()->from($this->table('inventory_source_item'), ['source_code', 'quantity'])->where('sku = ?', self::SKU)
-            );
-            foreach ($rows as $code => $qty) {
-                self::$sourceBaseline[(string) $code] = (float) $qty;
+        foreach (self::RESTORED_SKUS as $sku) {
+            if ($this->inventoryInstalled()) {
+                $rows = $connection->fetchPairs(
+                    $connection->select()->from($this->table('inventory_source_item'), ['source_code', 'quantity'])->where('sku = ?', $sku)
+                );
+                self::$sourceBaseline[$sku] = [];
+                foreach ($rows as $code => $qty) {
+                    self::$sourceBaseline[$sku][(string) $code] = (float) $qty;
+                }
             }
+            self::$legacyBaseline[$sku] = $this->legacyQty($sku);
         }
-        self::$legacyBaseline = $this->legacyQty();
     }
 
     /**
@@ -401,22 +535,31 @@ abstract class StoreCase extends TestCase
     private function restoreSku(): void
     {
         $connection = $this->connection();
-        if ($this->inventoryInstalled()) {
-            $connection->delete($this->table('inventory_reservation'), ['sku = ?' => self::SKU]);
-            foreach (self::$sourceBaseline as $code => $qty) {
-                $connection->update(
-                    $this->table('inventory_source_item'),
-                    ['quantity' => $qty, 'status' => 1],
-                    ['sku = ?' => self::SKU, 'source_code = ?' => $code]
-                );
+        foreach (self::RESTORED_SKUS as $sku) {
+            if ($this->inventoryInstalled()) {
+                $connection->delete($this->table('inventory_reservation'), ['sku = ?' => $sku]);
+                foreach (self::$sourceBaseline[$sku] ?? [] as $code => $qty) {
+                    $connection->update(
+                        $this->table('inventory_source_item'),
+                        ['quantity' => $qty, 'status' => 1],
+                        ['sku = ?' => $sku, 'source_code = ?' => $code]
+                    );
+                }
             }
-        }
-        if (self::$legacyBaseline !== null) {
-            $connection->update(
-                $this->table('cataloginventory_stock_item'),
-                ['qty' => self::$legacyBaseline, 'is_in_stock' => 1],
-                ['product_id = ?' => $this->productId(self::SKU)]
-            );
+            if (isset(self::$legacyBaseline[$sku])) {
+                $productId = $this->productId($sku);
+                $connection->update(
+                    $this->table('cataloginventory_stock_item'),
+                    ['qty' => self::$legacyBaseline[$sku], 'is_in_stock' => 1],
+                    ['product_id = ?' => $productId]
+                );
+                // Magento's stock registry keeps the stock item it last read for
+                // the process; a return to stock through it would add to that
+                // stale copy and write it back over the row restored here.
+                $storage = self::$objectManager->get(\Magento\CatalogInventory\Model\StockRegistryStorage::class);
+                $storage->removeStockItem($productId);
+                $storage->removeStockStatus($productId);
+            }
         }
     }
 }

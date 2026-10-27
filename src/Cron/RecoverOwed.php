@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -21,12 +21,6 @@ class RecoverOwed
 {
     public const OWED_FOR_SECONDS = 120;
 
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     * @param StockRegistrationInterface $registration
-     * @param LoggerInterface $logger
-     */
     public function __construct(
         private readonly ObligationResource $obligations,
         private readonly StockRegistrationInterface $registration,
@@ -37,7 +31,6 @@ class RecoverOwed
     /**
      * Registers the obligations owed longer than two minutes, oldest first; a failure is logged and the obligation stays owed.
      *
-     * @return void
      */
     public function execute(): void
     {
@@ -46,7 +39,8 @@ class RecoverOwed
             try {
                 $this->registration->register($orderId);
             } catch (\Throwable $e) {
-                $this->logger->warning('Stock registration recovery failed for order; it stays owed', [
+                // the registration logged the failure itself
+                $this->logger->debug('Stock registration recovery failed for order; it stays owed', [
                     'order_id' => $orderId,
                     'exception' => $e->getMessage(),
                 ]);

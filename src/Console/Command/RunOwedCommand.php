@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -23,12 +23,6 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class RunOwedCommand extends Command
 {
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     * @param StockRegistrationInterface $registration
-     * @param State $appState
-     */
     public function __construct(
         private readonly ObligationResource $obligations,
         private readonly StockRegistrationInterface $registration,
@@ -40,7 +34,6 @@ class RunOwedCommand extends Command
     /**
      * Names the command and its optional order ids.
      *
-     * @return void
      */
     protected function configure(): void
     {
@@ -51,9 +44,6 @@ class RunOwedCommand extends Command
 
     /**
      * Registers every owed order, or the ones named; exits non-zero when one failed.
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     * @return int
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
@@ -65,6 +55,11 @@ class RunOwedCommand extends Command
         $ids = array_map('intval', (array) $input->getArgument('order-id'));
         if ($ids === []) {
             $ids = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
+        } else {
+            // an order named by hand is tried again, given up on or not
+            foreach ($ids as $orderId) {
+                $this->obligations->reopen($orderId);
+            }
         }
         $failed = 0;
         foreach ($ids as $orderId) {

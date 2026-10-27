@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Test\Unit\Observer;
 
 use Hyva\InventoryOrderReservation\Model\ObligationRecorder;
+use Hyva\InventoryOrderReservation\Observer\MarkNewOrderObserver;
 use Hyva\InventoryOrderReservation\Observer\RecordObligationObserver;
 use Magento\Framework\Event;
 use Magento\Framework\Event\Observer;
@@ -25,20 +26,20 @@ class RecordObligationObserverTest extends TestCase
         $recorder->expects(self::once())->method('record');
         $observer = new RecordObligationObserver($recorder);
 
-        $observer->execute($this->event($this->order(origEntityId: null)));
-        $observer->execute($this->event($this->order(origEntityId: 41)));
+        $observer->execute($this->event($this->order(new: true)));
+        $observer->execute($this->event($this->order(new: false)));
     }
 
     public function test_a_second_save_of_the_same_new_order_records_nothing(): void
     {
-        // the original data stays unset after a save, so the object reads
-        // as new again when a plugin saves it a second time in the request
+        // the mark made before the first save stays on the object, so it
+        // reads as new again when a plugin saves it a second time in the request
         $recorder = $this->createMock(ObligationRecorder::class);
         $recorder->method('isRequested')->willReturn(true);
         $recorder->method('isRecorded')->willReturn(true);
         $recorder->expects(self::never())->method('record');
 
-        (new RecordObligationObserver($recorder))->execute($this->event($this->order(origEntityId: null)));
+        (new RecordObligationObserver($recorder))->execute($this->event($this->order(new: true)));
     }
 
     public function test_an_unflagged_order_is_left_alone(): void
@@ -47,13 +48,13 @@ class RecordObligationObserverTest extends TestCase
         $recorder->method('isRequested')->willReturn(false);
         $recorder->expects(self::never())->method('record');
 
-        (new RecordObligationObserver($recorder))->execute($this->event($this->order(origEntityId: null)));
+        (new RecordObligationObserver($recorder))->execute($this->event($this->order(new: true)));
     }
 
-    private function order(?int $origEntityId): Order
+    private function order(bool $new): Order
     {
-        $order = $this->getMockBuilder(Order::class)->disableOriginalConstructor()->onlyMethods(['getOrigData'])->getMock();
-        $order->method('getOrigData')->with('entity_id')->willReturn($origEntityId);
+        $order = $this->getMockBuilder(Order::class)->disableOriginalConstructor()->onlyMethods(['getData'])->getMock();
+        $order->method('getData')->with(MarkNewOrderObserver::NEW_ORDER)->willReturn($new);
         return $order;
     }
 

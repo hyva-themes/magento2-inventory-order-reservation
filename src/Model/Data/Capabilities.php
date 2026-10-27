@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -12,12 +12,6 @@ use Hyva\InventoryOrderReservation\Api\Data\CapabilitiesInterface;
 
 class Capabilities implements CapabilitiesInterface
 {
-    /**
-     * Constructor.
-     * @param string $version
-     * @param string $mode
-     * @param string $attribute
-     */
     public function __construct(
         private readonly string $version,
         private readonly string $mode,
@@ -28,7 +22,6 @@ class Capabilities implements CapabilitiesInterface
     /**
      * The module's version.
      *
-     * @return string
      */
     public function getVersion(): string
     {
@@ -38,7 +31,6 @@ class Capabilities implements CapabilitiesInterface
     /**
      * "inventory" or "legacy".
      *
-     * @return string
      */
     public function getMode(): string
     {
@@ -48,7 +40,6 @@ class Capabilities implements CapabilitiesInterface
     /**
      * The extension attribute to send: "reserve_stock".
      *
-     * @return string
      */
     public function getAttribute(): string
     {

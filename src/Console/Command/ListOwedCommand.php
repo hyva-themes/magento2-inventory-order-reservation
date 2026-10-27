@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -19,10 +19,6 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class ListOwedCommand extends Command
 {
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     */
     public function __construct(
         private readonly ObligationResource $obligations
     ) {
@@ -32,7 +28,6 @@ class ListOwedCommand extends Command
     /**
      * Names the command and what it lists.
      *
-     * @return void
      */
     protected function configure(): void
     {
@@ -42,14 +37,12 @@ class ListOwedCommand extends Command
 
     /**
      * One line per owed sku: order, sku, quantity, mode, attempts, the last reason.
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     * @return int
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $ids = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
-        if ($ids === []) {
+        $refused = $this->obligations->orderIdsRefused();
+        if ($ids === [] && $refused === []) {
             $output->writeln('<info>No order owes its stock registration.</info>');
             return Cli::RETURN_SUCCESS;
         }
@@ -69,6 +62,24 @@ class ListOwedCommand extends Command
                 ));
             }
         }
+        foreach ($refused as $orderId) {
+            foreach ($this->obligations->forOrder($orderId) as $obligation) {
+                if (!$obligation->isRefused()) {
+                    continue;
+                }
+                $output->writeln(sprintf(
+                    '<comment>order %d  sku %s  qty %s  mode %s  given up after %d attempts%s  (inventory:order-reservation:run %d tries again)</comment>',
+                    $orderId,
+                    $obligation->sku,
+                    rtrim(rtrim(number_format($obligation->qtyOrdered, 4, '.', ''), '0'), '.'),
+                    $obligation->mode,
+                    $obligation->attempts,
+                    $obligation->lastError !== null ? '  last error: ' . $obligation->lastError : '',
+                    $orderId
+                ));
+            }
+        }
+
         return Cli::RETURN_SUCCESS;
     }
 }

@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -10,13 +10,19 @@ namespace Hyva\InventoryOrderReservation\Model;
 
 /**
  * One sku of what an order owed at its creation. Read and written through
- * ObligationResource; never modelled as an ORM entity, because the rows are
+ * ObligationResource; never modeled as an ORM entity, because the rows are
  * written inside the order's own save and read inside the order's lock.
  */
 class Obligation
 {
     public const STATUS_OWED = 'owed';
     public const STATUS_DONE = 'done';
+    /** The registration gave up after MAX_ATTEMPTS; Magento's own listing and a compensation take over. */
+    public const STATUS_REFUSED = 'refused';
+    /** Attempts before the registration gives up: two hours of the five-minute cron. */
+    public const MAX_ATTEMPTS = 24;
+    /** Quantities within this of each other are the same quantity. */
+    public const TOLERANCE = 0.00005;
 
     public const MODE_INVENTORY = 'inventory';
     public const MODE_LEGACY = 'legacy';
@@ -24,20 +30,6 @@ class Obligation
     public const SETTLED_BY_REGISTRATION = 'registration';
     public const SETTLED_BY_COMPENSATION = 'compensation';
 
-    /**
-     * Constructor.
-     * @param int $orderId
-     * @param string $sku
-     * @param ?string $productType
-     * @param float $qtyOrdered
-     * @param int $websiteId
-     * @param ?int $stockId
-     * @param string $mode
-     * @param string $status
-     * @param ?string $settledBy
-     * @param int $attempts
-     * @param ?string $lastError
-     */
     public function __construct(
         public readonly int $orderId,
         public readonly string $sku,
@@ -49,17 +41,22 @@ class Obligation
         public readonly string $status = self::STATUS_OWED,
         public readonly ?string $settledBy = null,
         public readonly int $attempts = 0,
-        public readonly ?string $lastError = null
+        public readonly ?string $lastError = null,
+        public readonly ?int $productId = null
     ) {
     }
 
     /**
      * Whether the stock side of this sku is still to be registered.
      *
-     * @return bool
      */
     public function isOwed(): bool
     {
         return $this->status === self::STATUS_OWED;
+    }
+
+    public function isRefused(): bool
+    {
+        return $this->status === self::STATUS_REFUSED;
     }
 }

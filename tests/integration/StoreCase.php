@@ -11,7 +11,7 @@ namespace Hyva\InventoryOrderReservation\Test\Integration;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Obligation;
-use Hyva\InventoryOrderReservation\Model\OptionalInventory;
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
@@ -80,7 +80,7 @@ abstract class StoreCase extends TestCase
 
     protected function inventoryInstalled(): bool
     {
-        return self::$objectManager->get(OptionalInventory::class)->isInstalled();
+        return self::$objectManager->get(InventoryPresence::class)->isInventory();
     }
 
     protected function requireInventory(): void
@@ -571,6 +571,59 @@ abstract class StoreCase extends TestCase
     protected function dropPlacements(string $sku = self::SKU): void
     {
         $this->connection()->delete($this->table('inventory_reservation'), ['sku = ?' => $sku]);
+    }
+
+    /**
+     * A second process holding the order's lock while registering it, for the given seconds: a real lock holder.
+     *
+     * @return array{0: resource, 1: array<int, resource>, 2: string}
+     */
+    protected function holdLockWhileRegistering(int $orderId, int $seconds): array
+    {
+        $root = self::magentoRoot();
+        $marker = sys_get_temp_dir() . '/ior-lock-' . $orderId . '-' . uniqid();
+        $command = sprintf(
+            '%s %s %s %d %d %s register',
+            escapeshellarg(PHP_BINARY),
+            escapeshellarg(__DIR__ . '/bin/hold-order-lock.php'),
+            escapeshellarg($root),
+            $orderId,
+            $seconds,
+            escapeshellarg($marker)
+        );
+        $pipes = [];
+        // a second PHP process is the point of this test: a real lock holder
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        $deadline = microtime(true) + 60;
+        while (!file_exists($marker)) {
+            if (microtime(true) > $deadline) {
+                self::fail('the lock holder never took the lock: ' . stream_get_contents($pipes[2]));
+            }
+            usleep(100000);
+        }
+        return [$process, $pipes, $marker];
+    }
+
+    /**
+     * @param array{0: resource, 1: array<int, resource>, 2: string} $child
+     */
+    protected function finish(array $child): void
+    {
+        [$process, $pipes, $marker] = $child;
+        $out = stream_get_contents($pipes[1]);
+        $err = stream_get_contents($pipes[2]);
+        foreach ($pipes as $pipe) {
+            fclose($pipe);
+        }
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $exit = proc_close($process);
+        if (is_file($marker)) {
+            unlink($marker);
+        }
+        self::assertSame(0, $exit, 'the lock holder ended cleanly: ' . $err);
+        self::assertStringContainsString('released', $out);
     }
 
     protected function productId(string $sku): int

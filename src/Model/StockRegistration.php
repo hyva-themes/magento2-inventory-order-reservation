@@ -33,14 +33,14 @@ use Psr\Log\LoggerInterface;
 class StockRegistration implements StockRegistrationInterface
 {
     /**
-     * @param HandlerInterface[] $handlers keyed by Obligation::MODE_*
+     * @param \ArrayAccess<string, HandlerInterface> $handlers keyed by Obligation::MODE_*, each built on first use
      */
     public function __construct(
         private readonly OrderMutexInterface $orderMutex,
         private readonly ObligationResource $obligations,
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly LoggerInterface $logger,
-        private readonly array $handlers = []
+        private readonly \ArrayAccess $handlers
     ) {
     }
 

@@ -118,7 +118,7 @@ class StockRegistrationTest extends TestCase
             $resource,
             $orders,
             $this->createMock(LoggerInterface::class),
-            [Obligation::MODE_INVENTORY => $handler]
+            new \ArrayObject([Obligation::MODE_INVENTORY => $handler])
         );
     }
 }

@@ -11,9 +11,10 @@ namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
 
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\ObligationRecorder;
-use Hyva\InventoryOrderReservation\Model\OptionalInventory;
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\ProductIdentities;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
+use Hyva\InventoryOrderReservation\Model\ResourceModel\WebsiteStock;
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Sales\Model\Order\Item;
 use Magento\Store\Api\Data\StoreInterface;
@@ -40,9 +41,7 @@ class ObligationRecorderTest extends TestCase
         $resource->method('insert')->willReturnCallback(function (array $rows) use (&$inserted): void {
             $inserted = $rows;
         });
-        $inventory = $this->createMock(OptionalInventory::class);
-        $inventory->method('isInstalled')->willReturn(true);
-        $inventory->method('stockIdForWebsite')->with('base')->willReturn(2);
+        $inventory = $this->inventory(true);
         $this->catalog = [100 => ['sku' => 'plant-stand-teak', 'type' => 'simple'], 200 => ['sku' => 'mug', 'type' => 'simple']];
         $recorder = $this->recorder($resource, $inventory);
         $order = $this->order(77, [
@@ -120,34 +119,52 @@ class ObligationRecorderTest extends TestCase
     {
         $resource = $this->createMock(ObligationResource::class);
         $resource->method('hasRowsFor')->willReturnMap([[77, true], [78, false]]);
-        $recorder = $this->recorder($resource, $this->createMock(OptionalInventory::class));
+        $recorder = $this->recorder($resource, $this->inventory(true));
         self::assertTrue($recorder->isRecorded($this->order(77, [], flagged: true)));
         self::assertFalse($recorder->isRecorded($this->order(78, [], flagged: true)));
     }
 
     public function test_an_order_without_the_flag_is_not_requested(): void
     {
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->createMock(OptionalInventory::class));
+        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->inventory(true));
         self::assertFalse($recorder->isRequested($this->order(1, [], flagged: false)));
         self::assertFalse($recorder->isRequested($this->order(1, [], flagged: null)));
     }
 
-    private function recorder(ObligationResource $resource, OptionalInventory $inventory): ObligationRecorder
+    private function recorder(ObligationResource $resource, InventoryPresence $inventory): ObligationRecorder
     {
         $products = $this->createMock(ProductIdentities::class);
         $products->method('byProductIds')->willReturnCallback(
             fn (array $ids): array => array_intersect_key($this->catalog, array_flip(array_map('intval', $ids)))
         );
 
-        return new ObligationRecorder($resource, $inventory, $this->websites('base'), $products);
+        return new ObligationRecorder($resource, $inventory, $this->websiteStock(2), $this->websites('base'), $products);
     }
 
-    private function legacy(): OptionalInventory
+    private function legacy(): InventoryPresence
     {
-        $inventory = $this->createMock(OptionalInventory::class);
-        $inventory->method('isInstalled')->willReturn(false);
+        return $this->inventory(false);
+    }
 
+    /**
+     * A store with or without Magento Inventory.
+     */
+    private function inventory(bool $present): InventoryPresence
+    {
+        $inventory = $this->createMock(InventoryPresence::class);
+        $inventory->method('isInventory')->willReturn($present);
+        $inventory->method('mode')->willReturn($present ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY);
         return $inventory;
+    }
+
+    /**
+     * The website's stock as the recorder's one query reads it: `base` sells from the given stock.
+     */
+    private function websiteStock(?int $stockId): WebsiteStock
+    {
+        $websiteStock = $this->createMock(WebsiteStock::class);
+        $websiteStock->method('idForWebsiteCode')->with('base')->willReturn($stockId);
+        return $websiteStock;
     }
 
     private function websites(string $code): WebsiteRepositoryInterface

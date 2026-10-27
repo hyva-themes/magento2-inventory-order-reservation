@@ -23,7 +23,7 @@ class CapabilitiesService implements CapabilitiesInterface
 
     public function __construct(
         private readonly CapabilitiesFactory $capabilitiesFactory,
-        private readonly OptionalInventory $inventory
+        private readonly InventoryPresence $inventory
     ) {
     }
 
@@ -35,7 +35,7 @@ class CapabilitiesService implements CapabilitiesInterface
     {
         return $this->capabilitiesFactory->create([
             'version' => self::VERSION,
-            'mode' => $this->inventory->isInstalled() ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY,
+            'mode' => $this->inventory->mode(),
         ]);
     }
 }

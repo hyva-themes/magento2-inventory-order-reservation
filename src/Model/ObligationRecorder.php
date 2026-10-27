@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Model;
 
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
+use Hyva\InventoryOrderReservation\Model\ResourceModel\WebsiteStock;
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Store\Api\WebsiteRepositoryInterface;
 
@@ -22,7 +23,8 @@ class ObligationRecorder
 {
     public function __construct(
         private readonly ObligationResource $obligations,
-        private readonly OptionalInventory $inventory,
+        private readonly InventoryPresence $inventory,
+        private readonly WebsiteStock $websiteStock,
         private readonly WebsiteRepositoryInterface $websiteRepository,
         private readonly ProductIdentities $products
     ) {
@@ -54,10 +56,12 @@ class ObligationRecorder
     public function record(OrderInterface $order): array
     {
         $websiteId = (int) $order->getStore()->getWebsiteId();
-        $mode = $this->inventory->isInstalled() ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY;
+        $mode = $this->inventory->mode();
         $stockId = null;
         if ($mode === Obligation::MODE_INVENTORY) {
-            $stockId = $this->inventory->stockIdForWebsite(
+            // fixed now, by one query: the stock the website sells from today,
+            // which the registration honours whatever the mapping is then
+            $stockId = $this->websiteStock->idForWebsiteCode(
                 (string) $this->websiteRepository->getById($websiteId)->getCode()
             );
         }

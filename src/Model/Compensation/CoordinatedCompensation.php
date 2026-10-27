@@ -34,7 +34,7 @@ use Magento\Sales\Model\OrderMutexInterface;
  */
 class CoordinatedCompensation
 {
-    /** @var bool while the service itself writes, so its writer plugin passes the row through */
+    /** True while the service itself writes, so its writer plugin passes the row through. */
     private bool $writing = false;
 
     public function __construct(
@@ -49,75 +49,67 @@ class CoordinatedCompensation
 
     /**
      * Whether the service is appending its own validated row right now, so the writer plugin lets it through.
-     *
      */
     public function isWriting(): bool
     {
         return $this->writing;
     }
 
-    /** @param object $reservation a \Magento\InventoryReservationsApi\Model\ReservationInterface
-     * @throws LocalizedException when the order's registration cannot complete; the compensation is then refused with that reason
+    /**
+     * @param object $reservation a \Magento\InventoryReservationsApi\Model\ReservationInterface
+     * @throws LocalizedException when the order's registration, the write or the settlement cannot complete; nothing is written then
      */
     public function apply(int $orderId, object $reservation): Outcome
     {
-        return $this->orderMutex->execute($orderId, [$this, 'applyLocked'], [$orderId, $reservation]);
+        return $this->orderMutex->execute($orderId, $this->applyLocked(...), [$orderId, $reservation]);
     }
 
-    /**
-     * The locked part.
-     */
-    public function applyLocked(int $orderId, object $reservation): Outcome
+    private function applyLocked(int $orderId, object $reservation): Outcome
     {
         $ran = $this->registration->registerLocked($orderId);
-        $order = $this->orderRepository->get($orderId);
         $sku = (string) $reservation->getSku();
         $stockId = (int) $reservation->getStockId();
         $requested = (float) $reservation->getQuantity();
         $obligation = $this->obligationFor($orderId, $sku);
         if ($obligation === null) {
-            return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, 0.0, 0.0, $ran, 'the order owes nothing on this sku');
+            return $this->refuse($sku, $stockId, $requested, $ran, 'the order owes nothing on this sku');
         }
         if ($obligation->mode !== Obligation::MODE_INVENTORY || $obligation->stockId === null) {
-            return new Outcome(
-                Outcome::REFUSED,
-                $sku,
-                $stockId,
-                $requested,
-                0.0,
-                0.0,
-                $ran,
-                'the order\'s stock side is the legacy stock item, not a Magento Inventory stock'
-            );
+            return $this->refuse($sku, $stockId, $requested, $ran, 'the order\'s stock side is the legacy stock item, not a Magento Inventory stock');
         }
+        // what the order still owes on the sku by Magento's own rule, on the stock it is registered on
+        $order = $this->orderRepository->get($orderId);
+        $remaining = $this->remaining->forOrderSku($order, $sku, $obligation->stockId)['remaining'];
         if ($obligation->stockId !== $stockId) {
-            $own = $this->remaining->forOrderSku($order, $sku, $obligation->stockId);
-            return new Outcome(
-                Outcome::REFUSED,
+            return $this->refuse(
                 $sku,
                 $stockId,
                 $requested,
-                $own['remaining'],
-                $own['remaining'],
                 $ran,
-                sprintf('stock %d named, the order is registered on stock %d', $stockId, $obligation->stockId)
+                sprintf('stock %d named, the order is registered on stock %d', $stockId, $obligation->stockId),
+                $remaining
             );
         }
-        $state = $this->remaining->forOrderSku($order, $sku, $obligation->stockId);
-        $remaining = $state['remaining'];
         if (abs($remaining) < Obligation::TOLERANCE) {
             return new Outcome(Outcome::ALREADY_BALANCED, $sku, $stockId, $requested, 0.0, 0.0, $ran);
         }
         if (abs($requested) < Obligation::TOLERANCE || ($requested < 0) !== ($remaining < 0)) {
-            return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, $remaining, $remaining, $ran, 'wrong direction');
+            return $this->refuse($sku, $stockId, $requested, $ran, 'wrong direction', $remaining);
         }
         if (abs($requested) > abs($remaining) + Obligation::TOLERANCE) {
-            return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, $remaining, $remaining, $ran, 'more than remains');
+            return $this->refuse($sku, $stockId, $requested, $ran, 'more than remains', $remaining);
         }
         $writer = $this->inventory->appendReservations();
         if ($writer === null) {
             throw new LocalizedException(__('Magento Inventory is not available on this store.'));
         }
+        if (!$this->obligations->isOneConnection()) {
+            throw new LocalizedException(__(
+                'A coordinated compensation needs the sales tables and the inventory tables on one database connection; this store keeps them apart.'
+            ));
+        }
+        // under the order lock, inside its transaction: the row and the
+        // settlement below land together or not at all
         $this->writing = true;
         try {
             $writer->execute([$reservation]);
@@ -126,8 +118,10 @@ class CoordinatedCompensation
         }
         $after = round($remaining - $requested, 4);
         if ($obligation->isRefused() && abs($after) < Obligation::TOLERANCE) {
-            // the registration gave the order up; this compensation settled it
-            $this->obligations->markDone($orderId, Obligation::SETTLED_BY_COMPENSATION);
+            // the registration gave the order up; this compensation settled
+            // this sku. The order's other skus keep their own state until
+            // each is balanced, so one repair never hides another discrepancy.
+            $this->obligations->markRowDone($orderId, $sku, Obligation::SETTLED_BY_COMPENSATION);
         }
         return new Outcome(
             abs($after) < Obligation::TOLERANCE ? Outcome::APPLIED : Outcome::PARTIAL,
@@ -141,8 +135,15 @@ class CoordinatedCompensation
     }
 
     /**
+     * A refusal: nothing written, the remaining discrepancy reported as it stands.
+     */
+    private function refuse(string $sku, int $stockId, float $requested, bool $ran, string $reason, float $remaining = 0.0): Outcome
+    {
+        return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, $remaining, $remaining, $ran, $reason);
+    }
+
+    /**
      * The order's persisted obligation for the sku, the row the request is held against.
-     *
      */
     private function obligationFor(int $orderId, string $sku): ?Obligation
     {

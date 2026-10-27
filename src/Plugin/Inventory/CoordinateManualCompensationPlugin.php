@@ -8,31 +8,48 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Plugin\Inventory;
 
+use Hyva\InventoryOrderReservation\Model\Compensation\CompensationRunNotes;
 use Hyva\InventoryOrderReservation\Model\Compensation\CoordinatedCompensation;
+use Hyva\InventoryOrderReservation\Model\Compensation\Outcome;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Exception\CouldNotSaveException;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Serialize\SerializerInterface;
 use Magento\InventoryReservationsApi\Model\AppendReservationsInterface;
+use Magento\InventoryReservationsApi\Model\ReservationInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Every manual compensation that names an order reaches the coordinated
- * service, whichever code appends it (Magento's command, a store's own
- * integration). Rows of other kinds, and rows for orders this module has
+ * service, whichever code appends it through Inventory's reservation
+ * writer (Magento's command, a store's own integration that uses the
+ * writer); a row written straight into the reservation table is not
+ * seen here. Rows of other kinds, and rows for orders this module has
  * no obligation for, pass through untouched. A refused compensation is a
  * CouldNotSaveException naming the discrepancy, so a caller that reads
- * the writer's exceptions learns why.
+ * the writer's exceptions learns why; a failure under the order's lock
+ * (the registration, the write, the settlement) rolls its transaction
+ * back and is the same exception, with the module's own wording kept
+ * and a database or runtime failure's text left to the log, since the
+ * web API shows a localized message to its caller. Nothing is written
+ * either way.
  */
 class CoordinateManualCompensationPlugin
 {
+    private const EVENT_MANUAL_COMPENSATION = 'manual_compensation';
+    private const OBJECT_TYPE_ORDER = 'order';
+
     public function __construct(
         private readonly CoordinatedCompensation $coordinated,
         private readonly ObligationResource $obligations,
-        private readonly SerializerInterface $serializer
+        private readonly SerializerInterface $serializer,
+        private readonly CompensationRunNotes $notes,
+        private readonly LoggerInterface $logger
     ) {
     }
 
-    /** @param AppendReservationsInterface $subject
-     * @param array<int, object> $reservations
+    /**
+     * @param ReservationInterface[] $reservations
      * @throws CouldNotSaveException
      */
     public function aroundExecute(AppendReservationsInterface $subject, callable $proceed, array $reservations): void
@@ -60,15 +77,19 @@ class CoordinateManualCompensationPlugin
         foreach ($coordinated as [$orderId, $reservation]) {
             try {
                 $outcome = $this->coordinated->apply($orderId, $reservation);
+            } catch (LocalizedException $e) {
+                // the module's own wording: no Inventory, two connections, no handler
+                throw new CouldNotSaveException(__('Compensation for order %1 was not written: %2', $orderId, $e->getMessage()), $e);
             } catch (\Throwable $e) {
-                throw new CouldNotSaveException(__(
-                    'Compensation for order %1 refused: its stock registration could not complete (%2).',
-                    $orderId,
-                    $e->getMessage()
-                ), $e);
+                // a database or runtime failure under the lock: its transaction
+                // rolled back; the text stays in the log, not in the caller's message
+                $this->logger->error('Coordinated compensation failed', ['order_id' => $orderId, 'exception' => $e]);
+                throw new CouldNotSaveException(__('Compensation for order %1 was not written; the exception log has the cause.', $orderId), $e);
             }
-            if ($outcome->isRefused()) {
-                throw new CouldNotSaveException(__('Compensation for order %1 %2', $orderId, $outcome->describe()));
+            $this->notes->noteOutcome($orderId, $outcome);
+            if ($outcome->isRefused() || $outcome->kind === Outcome::ALREADY_BALANCED) {
+                // nothing was written: Magento's loop prints the reason and exits non-zero
+                throw new CouldNotSaveException(__('Compensation for order %1: %2', $orderId, $outcome->describe()));
             }
         }
     }
@@ -77,7 +98,7 @@ class CoordinateManualCompensationPlugin
      * The order a manual compensation names, when this module holds an
      * obligation for it; null for every other row.
      */
-    private function coordinatedOrderId(object $reservation): ?int
+    private function coordinatedOrderId(ReservationInterface $reservation): ?int
     {
         $metadata = $reservation->getMetadata();
         if (!is_string($metadata) || $metadata === '') {
@@ -88,11 +109,14 @@ class CoordinateManualCompensationPlugin
         } catch (\Throwable) {
             return null;
         }
-        if (!is_array($data) || ($data['event_type'] ?? '') !== 'manual_compensation' || ($data['object_type'] ?? '') !== 'order') {
+        if (!is_array($data)
+            || ($data['event_type'] ?? '') !== self::EVENT_MANUAL_COMPENSATION
+            || ($data['object_type'] ?? '') !== self::OBJECT_TYPE_ORDER
+        ) {
             return null;
         }
         $orderId = (int) ($data['object_id'] ?? 0);
-        if ($orderId <= 0 || $this->obligations->forOrder($orderId) === []) {
+        if ($orderId <= 0 || !$this->obligations->hasRowsFor($orderId)) {
             return null;
         }
         return $orderId;

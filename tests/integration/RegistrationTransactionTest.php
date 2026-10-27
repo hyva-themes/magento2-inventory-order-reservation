@@ -40,7 +40,7 @@ class RegistrationTransactionTest extends StoreCase
             $registration->register($orderId);
             self::fail('the simulated failure must surface');
         } catch (LocalizedException $e) {
-            self::assertStringContainsString('simulated failure', $e->getMessage());
+            self::assertStringContainsString('simulated failure', (string) $e->getPrevious()?->getMessage(), 'the cause travels with the exception');
         }
 
         $stockAfterFailure = $inventory ? $this->reservationSum($orderId, $this->websiteStockId()) : $this->legacyQty();

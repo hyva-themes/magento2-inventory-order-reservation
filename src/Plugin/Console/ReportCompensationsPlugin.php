@@ -8,45 +8,37 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Plugin\Console;
 
-use Hyva\InventoryOrderReservation\Model\Compensation\CoordinatedCompensation;
-use Hyva\InventoryOrderReservation\Model\OptionalInventory;
-use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
-use Magento\Framework\App\Area;
-use Magento\Framework\App\State;
-use Magento\Framework\Console\Cli;
-use Magento\Framework\Serialize\SerializerInterface;
+use Hyva\InventoryOrderReservation\Model\Compensation\CompensationRunNotes;
+use Hyva\InventoryOrderReservation\Model\Compensation\Outcome;
+use Magento\CatalogInventory\Api\StockConfigurationInterface;
 use Magento\InventoryReservationCli\Command\CreateCompensations;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Magento's compensation command prints "was compensated by" for every
- * row it asked the writer to insert, whether the row was written or not,
- * and exits 0 unless the writer threw. With the coordinated service in
- * front of the writer, that would read a no-op as a compensation. This
- * plugin runs the command's loop itself: the same arguments, the same
- * parser, one line per row saying what happened, and a non-zero exit
- * status when anything was refused.
- *
- * The command's own input services are Inventory's and are fetched
- * through OptionalInventory at run time: setup:di:compile reflects every
- * constructor on the store, with or without Inventory, so no Inventory
- * type may stand in one (the plugin is only ever invoked where the
- * command exists).
+ * Magento's compensation command runs as it is: its header, its standard
+ * input, its parse errors, its line per row, its exit code, and every
+ * other plugin on it. This plugin only opens the run's notes for the
+ * command's duration and prints them under Magento's output: the remainder
+ * still owed after a partial compensation, a registration that completed
+ * first, and the store setting under which Magento writes no reservation
+ * at all while its loop still prints every row as compensated.
  */
 class ReportCompensationsPlugin
 {
     public function __construct(
-        private readonly CoordinatedCompensation $coordinated,
-        private readonly ObligationResource $obligations,
-        private readonly SerializerInterface $serializer,
-        private readonly State $appState,
-        private readonly OptionalInventory $inventory
+        private readonly CompensationRunNotes $notes,
+        private readonly StockConfigurationInterface $stockConfiguration,
+        private readonly LoggerInterface $logger
     ) {
     }
 
     /**
-     * Runs the command's loop with one accurate line per row and a non-zero exit when anything was refused.
+     * The result is Magento's, whatever happens here: a note that cannot be
+     * rendered is logged, and an exception out of Magento's loop closes the
+     * notes on its way out.
      */
     public function aroundExecute(
         CreateCompensations $subject,
@@ -54,115 +46,43 @@ class ReportCompensationsPlugin
         InputInterface $input,
         OutputInterface $output
     ): int {
+        $this->notes->open();
         try {
-            $this->appState->getAreaCode();
-        } catch (\Magento\Framework\Exception\LocalizedException) {
-            $this->appState->setAreaCode(Area::AREA_GLOBAL);
+            $result = (int) $proceed($input, $output);
+        } finally {
+            $this->notes->close();
         }
-        $standardInput = $this->inventory->compensationStandardInput();
-        $reservationFromArgument = $this->inventory->compensationArgumentReader();
-        if ($standardInput === null || $reservationFromArgument === null) {
-            return $proceed($input, $output);
+        try {
+            $this->report($output);
+        } catch (\Throwable $e) {
+            $this->logger->warning('The compensation notes could not be printed', ['exception' => $e->getMessage()]);
         }
-        $arguments = $input->getArgument('compensations');
-        if (empty($arguments)) {
-            $arguments = $standardInput->execute();
-        }
-        if (empty($arguments)) {
-            $output->writeln('<error>A list of compensations needs to be defined as argument or STDIN.</error>');
-            return Cli::RETURN_FAILURE;
-        }
-        $output->writeln('<info>Following reservations were created:</info>');
-        foreach ((array) $arguments as $argument) {
-            try {
-                $reservation = $reservationFromArgument->execute($argument);
-            } catch (\Throwable $e) {
-                $output->writeln(sprintf('  - <error>%s: %s</error>', $argument, $e->getMessage()));
-                continue;
+        return $result;
+    }
+
+    private function report(OutputInterface $output): void
+    {
+        $registered = [];
+        foreach ($this->notes->outcomes() as ['orderId' => $orderId, 'outcome' => $outcome]) {
+            if ($outcome->registrationRan && !isset($registered[$orderId])) {
+                $registered[$orderId] = true;
+                $output->writeln(sprintf('  - Order %d: its owed registration completed before the compensation', $orderId));
             }
-            $orderId = $this->orderIdWithObligation($reservation);
-            if ($orderId === null) {
-                // not an order this module knows: Magento's own writer, as before
-                try {
-                    $writer = $this->inventory->appendReservations();
-                    if ($writer === null) {
-                        throw new \RuntimeException('Magento Inventory is not available on this store.');
-                    }
-                    $writer->execute([$reservation]);
-                    if (!$this->isManaged((string) $reservation->getSku(), (int) $reservation->getStockId())) {
-                        $output->writeln(sprintf(
-                            '  - Product <comment>%s</comment>: Magento keeps no reservations for it (stock not managed), nothing written',
-                            $reservation->getSku()
-                        ));
-                        continue;
-                    }
-                    $output->writeln(sprintf(
-                        '  - Product <comment>%s</comment> was compensated by <comment>%+f</comment> for stock <comment>%s</comment>',
-                        $reservation->getSku(),
-                        $reservation->getQuantity(),
-                        $reservation->getStockId()
-                    ));
-                } catch (\Throwable $e) {
-                        $output->writeln(sprintf('  - <error>%s</error>', $e->getMessage()));
-                }
-                continue;
-            }
-            try {
-                $outcome = $this->coordinated->apply($orderId, $reservation);
-            } catch (\Throwable $e) {
+            if ($outcome->kind === Outcome::PARTIAL) {
                 $output->writeln(sprintf(
-                    '  - <error>Order %d, product %s: refused, its stock registration could not complete (%s)</error>',
+                    '  - Order %d, product <comment>%s</comment>: %+.4f still owed',
                     $orderId,
-                    $reservation->getSku(),
-                    $e->getMessage()
+                    OutputFormatter::escape($outcome->sku),
+                    $outcome->remainingAfter
                 ));
-                continue;
             }
-            if ($outcome->isRefused()) {
-            }
-            $output->writeln(sprintf(
-                '  - Order %d, product <comment>%s</comment>, stock <comment>%d</comment>: %s',
-                $orderId,
-                $outcome->sku,
-                $outcome->stockId,
-                $outcome->describe()
-            ));
         }
-        // as Magento's own command: a refused row is reported, the run succeeds
-        return Cli::RETURN_SUCCESS;
-    }
-
-    private function isManaged(string $sku, int $stockId): bool
-    {
-        $configuration = $this->inventory->stockItemConfiguration();
-        if ($configuration === null) {
-            return true;
+        if (!$this->stockConfiguration->canSubtractQty()) {
+            // Magento's own filter on the reservation writer drops every row
+            // under this setting, after its loop has printed the row as compensated
+            $output->writeln(
+                '  - "Decrease Stock When Order is Placed" is off: Magento keeps no reservations, nothing was written'
+            );
         }
-        try {
-            return (bool) $configuration->execute($sku, $stockId)->isManageStock();
-        } catch (\Throwable) {
-            return true;
-        }
-    }
-
-    /**
-     * The order a row names, when this module holds an obligation for it.
-     */
-    private function orderIdWithObligation(object $reservation): ?int
-    {
-        $metadata = $reservation->getMetadata();
-        if (!is_string($metadata) || $metadata === '') {
-            return null;
-        }
-        try {
-            $data = $this->serializer->unserialize($metadata);
-        } catch (\Throwable) {
-            return null;
-        }
-        $orderId = (int) ($data['object_id'] ?? 0);
-        if ($orderId <= 0 || ($data['object_type'] ?? '') !== 'order' || $this->obligations->forOrder($orderId) === []) {
-            return null;
-        }
-        return $orderId;
     }
 }

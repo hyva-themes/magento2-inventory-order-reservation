@@ -29,7 +29,7 @@
     <!-- Magento's repair tools, coordinated: a manual compensation naming an
          order this module owes completes the registration first and is read
          against what remains; the listing leaves owed orders out; the
-         command reports what happened per row. Plugins on Inventory types
+         command runs Magento's own loop and adds the module's notes under it. Plugins on Inventory types
          are only ever built where those types exist. -->
     <type name="Magento\InventoryReservationsApi\Model\AppendReservationsInterface">
         <plugin name="hyva_inventory_order_reservation_coordinate_manual_compensation"

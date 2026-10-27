@@ -56,16 +56,8 @@ class RegisterAfterCommitObserver implements ObserverInterface
         }
     }
 
-    /**
-     * Whether any of the order's obligations is still owed.
-     */
     private function owesAnything(int $orderId): bool
     {
-        foreach ($this->obligations->forOrder($orderId) as $obligation) {
-            if ($obligation->isOwed()) {
-                return true;
-            }
-        }
-        return false;
+        return $this->obligations->owedForOrder($orderId) !== [];
     }
 }

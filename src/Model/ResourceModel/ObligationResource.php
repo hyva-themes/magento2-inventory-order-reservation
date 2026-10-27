@@ -44,7 +44,8 @@ class ObligationResource
         return $this->resourceConnection->getConnection('sales') === $this->resourceConnection->getConnection();
     }
 
-    /** @param Obligation[] $obligations
+    /**
+     * @param Obligation[] $obligations
      */
     public function insert(array $obligations): void
     {
@@ -70,7 +71,6 @@ class ObligationResource
 
     /**
      * Whether the order has obligation rows on record, any status.
-     *
      */
     public function hasRowsFor(int $orderId): bool
     {
@@ -90,12 +90,27 @@ class ObligationResource
             // read under the lock a caller's outer transaction already holds
             $select->forUpdate(true);
         }
-        return array_map([$this, 'fromRow'], $connection->fetchAll($select));
+        return array_map($this->fromRow(...), $connection->fetchAll($select));
+    }
+
+    /**
+     * The order's obligations still owed, in row order.
+     *
+     * @return Obligation[]
+     */
+    public function owedForOrder(int $orderId, bool $forUpdate = false): array
+    {
+        return array_values(array_filter(
+            $this->forOrder($orderId, $forUpdate),
+            static fn (Obligation $obligation): bool => $obligation->isOwed()
+        ));
     }
 
     /**
      * Ids of orders with an obligation still owed, created before `$before`
      * (a database timestamp), oldest first.
+     *
+     * @return int[]
      */
     public function orderIdsOwed(string $before, int $limit = 200): array
     {
@@ -116,7 +131,7 @@ class ObligationResource
     /**
      * How many orders owe, and the oldest owed creation time; for the
      * admin message.
-     * @return array{count: int, oldest: ?string}
+     * @return array{count: int, oldest: ?string, refused: int}
      */
     public function owedSummary(): array
     {
@@ -141,6 +156,24 @@ class ObligationResource
      */
     public function markDone(int $orderId, string $settledBy): void
     {
+        $this->settle(['order_id = ?' => $orderId], $settledBy);
+    }
+
+    /**
+     * One sku of the order settled, the others untouched.
+     */
+    public function markRowDone(int $orderId, string $sku, string $settledBy): void
+    {
+        $this->settle(['order_id = ?' => $orderId, 'sku = ?' => $sku], $settledBy);
+    }
+
+    /**
+     * The rows matched, owed or refused, marked done in the caller's transaction.
+     *
+     * @param array<string, mixed> $where
+     */
+    private function settle(array $where, string $settledBy): void
+    {
         $this->connection()->update(
             $this->table(),
             [
@@ -149,7 +182,7 @@ class ObligationResource
                 'completed_at' => new \Zend_Db_Expr('CURRENT_TIMESTAMP'),
                 'last_error' => null,
             ],
-            ['order_id = ?' => $orderId, 'status IN (?)' => [Obligation::STATUS_OWED, Obligation::STATUS_REFUSED]]
+            $where + ['status IN (?)' => [Obligation::STATUS_OWED, Obligation::STATUS_REFUSED]]
         );
     }
 
@@ -204,7 +237,6 @@ class ObligationResource
 
     /**
      * Ids of orders the registration gave up on.
-     *
      */
     public function orderIdsRefused(int $limit = 200): array
     {
@@ -221,14 +253,14 @@ class ObligationResource
 
     /**
      * The obligation table's name with the store's prefix.
-     *
      */
     private function table(): string
     {
         return $this->resourceConnection->getTableName(self::TABLE);
     }
 
-    /** @param array<string, mixed> $row
+    /**
+     * @param array<string, mixed> $row
      */
     private function fromRow(array $row): Obligation
     {

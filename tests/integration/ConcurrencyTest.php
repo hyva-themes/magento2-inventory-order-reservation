@@ -21,9 +21,10 @@ class ConcurrencyTest extends StoreCase
         $orderId = (int) $this->placeOrder(1.0, reserveStock: false)->getEntityId();
         $this->insertOwed($orderId, 1.0);
 
-        $child = $this->holdLock($orderId, 4, register: true);
+        $child = $this->holdLockWhileRegistering($orderId, 4);
         $started = microtime(true);
-        $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
+        // the registration balanced the order while the compensation waited: refused as balanced
+        $this->appendExpectingBalanced($orderId, $stock, -1.0);
         $waited = microtime(true) - $started;
         $this->finish($child);
 
@@ -39,7 +40,7 @@ class ConcurrencyTest extends StoreCase
         $orderId = (int) $this->placeOrder(1.0, reserveStock: false)->getEntityId();
         $this->insertOwed($orderId, 1.0);
 
-        $child = $this->holdLock($orderId, 3, register: true);
+        $child = $this->holdLockWhileRegistering($orderId, 3);
         $second = $this->register($orderId);
         $this->finish($child);
 
@@ -54,19 +55,18 @@ class ConcurrencyTest extends StoreCase
     /**
      * @return array{0: resource, 1: array<int, resource>, 2: string}
      */
-    private function holdLock(int $orderId, int $seconds, bool $register): array
+    private function holdLockWhileRegistering(int $orderId, int $seconds): array
     {
-        $root = getenv('MAGENTO_ROOT') ?: '/var/www/html';
+        $root = self::magentoRoot();
         $marker = sys_get_temp_dir() . '/ior-lock-' . $orderId . '-' . uniqid();
         $command = sprintf(
-            '%s %s %s %d %d %s %s',
+            '%s %s %s %d %d %s register',
             escapeshellarg(PHP_BINARY),
             escapeshellarg(__DIR__ . '/bin/hold-order-lock.php'),
             escapeshellarg($root),
             $orderId,
             $seconds,
-            escapeshellarg($marker),
-            $register ? 'register' : ''
+            escapeshellarg($marker)
         );
         $pipes = [];
         // a second PHP process is the point of this test: a real lock holder
@@ -83,7 +83,8 @@ class ConcurrencyTest extends StoreCase
         return [$process, $pipes, $marker];
     }
 
-    /** @param array{0: resource, 1: array<int, resource>, 2: string} $child
+    /**
+     * @param array{0: resource, 1: array<int, resource>, 2: string} $child
      */
     private function finish(array $child): void
     {

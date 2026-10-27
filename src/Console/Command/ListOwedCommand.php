@@ -64,12 +64,12 @@ class ListOwedCommand extends Command
                     continue;
                 }
                 $output->writeln(sprintf(
-                    '<comment>order %d  sku %s  qty %s  mode %s  given up after %d attempts%s  (inventory:order-reservation:run %d tries again)</comment>',
+                    '<comment>order %d  sku %s  qty %s  mode %s  refused%s%s  (a compensation repairs it; inventory:order-reservation:run %d tries again)</comment>',
                     $orderId,
                     OutputFormatter::escape($obligation->sku),
                     $this->qty($obligation),
                     $obligation->mode,
-                    $obligation->attempts,
+                    $obligation->attempts > 0 ? sprintf(' after %d attempts', $obligation->attempts) : '',
                     $this->lastError($obligation),
                     $orderId
                 ));

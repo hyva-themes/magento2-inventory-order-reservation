@@ -60,7 +60,7 @@ class OwedMessage implements MessageInterface
         $summary = $this->obligations->owedSummary();
         if ($summary['refused'] > 0) {
             return (string) __(
-                'The stock registration of %1 order(s) created through the API was given up after repeated failures, and %2 still owe it. '
+                'The stock registration of %1 order(s) created through the API was refused, after repeated failures or for a discrepancy only a compensation repairs, and %2 still owe it. '
                 . 'Read bin/magento inventory:order-reservation:list for the reasons; inventory:order-reservation:run <order id> tries one again, '
                 . 'and a compensation through inventory:reservation:create-compensations settles it.',
                 $summary['refused'],

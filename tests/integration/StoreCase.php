@@ -419,6 +419,56 @@ abstract class StoreCase extends TestCase
         self::$objectManager->get(ObligationResource::class)->markRefused($orderId);
     }
 
+    /**
+     * One row refused for a reason a placement cannot fix, as the registration refuses it.
+     */
+    protected function refuseRow(int $orderId, string $sku, string $reason): void
+    {
+        self::$objectManager->get(ObligationResource::class)->markRowRefused($orderId, $sku, $reason);
+    }
+
+    /** Fails updates of the obligation table while it exists. */
+    private const FAILING_TRIGGER = 'hyva_test_settlement_fails';
+
+    /**
+     * From here on the obligation table refuses updates inside the
+     * database: every one with no sku given (a signaled error, the way a
+     * lost connection or a deadlock would fail a settlement), or the
+     * completion of the given sku only (its order id set to one no order
+     * has, which the foreign key refuses whatever the SQL mode), so a run
+     * that settles several rows fails on that one after the others went through.
+     */
+    protected function failSettlements(?string $sku = null): void
+    {
+        $this->letSettlementsPass();
+        $table = $this->table(ObligationResource::TABLE);
+        $this->connection()->query($sku === null
+            ? sprintf(
+                "CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'simulated failure after the compensation write'",
+                self::FAILING_TRIGGER,
+                $table
+            )
+            : sprintf(
+                "CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW SET NEW.order_id = IF(NEW.sku = %s AND NEW.status = 'done', -1, NEW.order_id)",
+                self::FAILING_TRIGGER,
+                $table,
+                $this->connection()->quote($sku)
+            ));
+    }
+
+    /**
+     * The trigger gone; a transaction a failure left open is rolled back
+     * first, since the store refuses DDL inside one.
+     */
+    protected function letSettlementsPass(): void
+    {
+        $connection = $this->connection();
+        while ($connection->getTransactionLevel() > 0) {
+            $connection->rollBack();
+        }
+        $connection->query(sprintf('DROP TRIGGER IF EXISTS %s', self::FAILING_TRIGGER));
+    }
+
     /** @return int[] */
     protected function orderIdsRefused(): array
     {

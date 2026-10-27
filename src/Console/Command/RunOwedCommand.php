@@ -10,11 +10,13 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
+use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\State;
 use Magento\Framework\Console\Cli;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -66,6 +68,20 @@ class RunOwedCommand extends Command
         foreach ($ids as $orderId) {
             try {
                 $ran = $this->registration->register($orderId);
+                $refused = array_filter($this->obligations->forOrder($orderId), static fn (Obligation $row): bool => $row->isRefused());
+                if ($refused !== []) {
+                    // a row nothing a placement can fix: the reason names the compensation that repairs it
+                    $failed++;
+                    foreach ($refused as $row) {
+                        $output->writeln(sprintf(
+                            '<error>order %d: sku %s refused: %s</error>',
+                            $orderId,
+                            OutputFormatter::escape($row->sku),
+                            OutputFormatter::escape((string) $row->lastError)
+                        ));
+                    }
+                    continue;
+                }
                 $output->writeln(sprintf('order %d: %s', $orderId, $ran ? 'registered' : 'nothing owed'));
             } catch (\Throwable $e) {
                 $failed++;

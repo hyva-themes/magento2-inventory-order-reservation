@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -8,6 +9,7 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Model\Handler;
 
+use Hyva\InventoryOrderReservation\Model\Compensation\RemainingInconsistency;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\OptionalInventory;
 use Magento\Framework\Exception\LocalizedException;
@@ -18,8 +20,12 @@ use Magento\Store\Api\WebsiteRepositoryInterface;
  * The order_placed reservation, through Inventory's sales-event service
  * (the one Adobe's documentation names for a business event), with a
  * sales event of type order_placed for the order and the website's sales
- * channel. One item to sell per sku, for the product types Inventory
- * manages, at minus the quantity ordered at creation.
+ * channel. One item to sell per sku, for what the order still owes on it
+ * by Magento's own rule: a shipment, a cancellation or a partial
+ * compensation that came first is on the rows already and is not placed
+ * again, so a registration retried after a repair by hand ends balanced.
+ * A sku reserved past what the order owes is nothing a placement can
+ * fix: the order is given up on for a compensation of the surplus.
  */
 class InventoryHandler implements HandlerInterface
 {
@@ -27,13 +33,15 @@ class InventoryHandler implements HandlerInterface
 
     public function __construct(
         private readonly OptionalInventory $inventory,
-        private readonly WebsiteRepositoryInterface $websiteRepository
+        private readonly WebsiteRepositoryInterface $websiteRepository,
+        private readonly RemainingInconsistency $remaining
     ) {
     }
 
     /**
-     * Places the order_placed reservation for the owed skus through Inventory's sales-event service.
-     * @throws LocalizedException when Inventory is not available
+     * Places what the owed skus still owe through Inventory's sales-event service; nothing when every sku is balanced.
+     * @throws LocalizedException when Inventory is not available, or an obligation names no stock to read the remainder on
+     * @throws RepairNeededException when a sku is reserved past what the order owes
      */
     public function register(OrderInterface $order, array $owed): void
     {
@@ -48,14 +56,31 @@ class InventoryHandler implements HandlerInterface
             throw new LocalizedException(__('Magento Inventory is not available on this store.'));
         }
         $items = [];
-        // PlaceReservationsForSalesEvent reads each sku's type from the
-        // catalog and leaves out what holds no stock of its own, as it does
-        // for the checkout; nothing is filtered here.
         foreach ($owed as $obligation) {
             if ($obligation->qtyOrdered <= 0) {
                 continue;
             }
-            $items[] = $itemFactory->create(['sku' => $obligation->sku, 'qty' => -$obligation->qtyOrdered]);
+            if ($obligation->stockId === null) {
+                throw new LocalizedException(__('The obligation for sku %1 names no stock to read its remainder on.', $obligation->sku));
+            }
+            // what is ordered and neither canceled, refunded nor shipped,
+            // less the rows already there on the stock the order was
+            // recorded on; PlaceReservationsForSalesEvent then reads each
+            // sku's type from the catalog and leaves out what holds no
+            // stock of its own, as it does for the checkout
+            $remaining = $this->remaining->forOrderSku($order, $obligation->sku, $obligation->stockId)['remaining'];
+            if (abs($remaining) < Obligation::TOLERANCE) {
+                continue;
+            }
+            if ($remaining > 0) {
+                throw new RepairNeededException(__(
+                    'Sku %1 is reserved %2 past what the order owes on stock %3; nothing to place, a compensation of %2 repairs it.',
+                    $obligation->sku,
+                    sprintf('%+.4f', $remaining),
+                    $obligation->stockId
+                ));
+            }
+            $items[] = $itemFactory->create(['sku' => $obligation->sku, 'qty' => $remaining]);
         }
         if ($items === []) {
             return;

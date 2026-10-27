@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -8,9 +9,11 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
+use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Console\Cli;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -25,10 +28,6 @@ class ListOwedCommand extends Command
         parent::__construct();
     }
 
-    /**
-     * Names the command and what it lists.
-     *
-     */
     protected function configure(): void
     {
         $this->setName('inventory:order-reservation:list')
@@ -40,29 +39,26 @@ class ListOwedCommand extends Command
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $ids = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
-        $refused = $this->obligations->orderIdsRefused();
-        if ($ids === [] && $refused === []) {
+        $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
+        $refusedIds = $this->obligations->orderIdsRefused();
+        if ($owedIds === [] && $refusedIds === []) {
             $output->writeln('<info>No order owes its stock registration.</info>');
             return Cli::RETURN_SUCCESS;
         }
-        foreach ($ids as $orderId) {
-            foreach ($this->obligations->forOrder($orderId) as $obligation) {
-                if (!$obligation->isOwed()) {
-                    continue;
-                }
+        foreach ($owedIds as $orderId) {
+            foreach ($this->obligations->owedForOrder($orderId) as $obligation) {
                 $output->writeln(sprintf(
                     'order %d  sku %s  qty %s  mode %s  attempts %d%s',
                     $orderId,
-                    $obligation->sku,
-                    rtrim(rtrim(number_format($obligation->qtyOrdered, 4, '.', ''), '0'), '.'),
+                    OutputFormatter::escape($obligation->sku),
+                    $this->qty($obligation),
                     $obligation->mode,
                     $obligation->attempts,
-                    $obligation->lastError !== null ? '  last error: ' . $obligation->lastError : ''
+                    $this->lastError($obligation)
                 ));
             }
         }
-        foreach ($refused as $orderId) {
+        foreach ($refusedIds as $orderId) {
             foreach ($this->obligations->forOrder($orderId) as $obligation) {
                 if (!$obligation->isRefused()) {
                     continue;
@@ -70,16 +66,32 @@ class ListOwedCommand extends Command
                 $output->writeln(sprintf(
                     '<comment>order %d  sku %s  qty %s  mode %s  given up after %d attempts%s  (inventory:order-reservation:run %d tries again)</comment>',
                     $orderId,
-                    $obligation->sku,
-                    rtrim(rtrim(number_format($obligation->qtyOrdered, 4, '.', ''), '0'), '.'),
+                    OutputFormatter::escape($obligation->sku),
+                    $this->qty($obligation),
                     $obligation->mode,
                     $obligation->attempts,
-                    $obligation->lastError !== null ? '  last error: ' . $obligation->lastError : '',
+                    $this->lastError($obligation),
                     $orderId
                 ));
             }
         }
 
         return Cli::RETURN_SUCCESS;
+    }
+
+    /**
+     * The quantity without trailing zeros: 2, 1.5, 0.25.
+     */
+    private function qty(Obligation $obligation): string
+    {
+        return rtrim(rtrim(number_format($obligation->qtyOrdered, 4, '.', ''), '0'), '.');
+    }
+
+    /**
+     * The last reason, escaped for the console's markup; empty when there is none.
+     */
+    private function lastError(Obligation $obligation): string
+    {
+        return $obligation->lastError !== null ? '  last error: ' . OutputFormatter::escape($obligation->lastError) : '';
     }
 }

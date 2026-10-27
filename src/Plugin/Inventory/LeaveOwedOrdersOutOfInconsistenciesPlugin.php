@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -10,6 +11,7 @@ namespace Hyva\InventoryOrderReservation\Plugin\Inventory;
 
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies;
+use Magento\InventoryReservationCli\Model\SalableQuantityInconsistency;
 
 /**
  * The inconsistency listing is diagnostic. An order whose registration
@@ -25,8 +27,6 @@ class LeaveOwedOrdersOutOfInconsistenciesPlugin
     ) {
     }
 
-    /** @param GetSalableQuantityInconsistencies $subject
-     */
     public function afterExecute(GetSalableQuantityInconsistencies $subject, \Generator $result): \Generator
     {
         foreach ($result as $bunch) {
@@ -41,19 +41,8 @@ class LeaveOwedOrdersOutOfInconsistenciesPlugin
         }
     }
 
-    /**
-     * Whether the inconsistency's order still owes its registration.
-     */
-    private function isOwed(object $inconsistency): bool
+    private function isOwed(SalableQuantityInconsistency $inconsistency): bool
     {
-        if (!method_exists($inconsistency, 'getObjectId')) {
-            return false;
-        }
-        foreach ($this->obligations->forOrder((int) $inconsistency->getObjectId()) as $obligation) {
-            if ($obligation->isOwed()) {
-                return true;
-            }
-        }
-        return false;
+        return $this->obligations->owedForOrder((int) $inconsistency->getObjectId()) !== [];
     }
 }

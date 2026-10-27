@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -9,6 +10,8 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Test\Integration;
 
 use Magento\Framework\Exception\CouldNotSaveException;
+use Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies;
+use Magento\InventoryReservationsApi\Model\CleanupReservationsInterface;
 
 /**
  * Magento's repair path against a registered order: a stale request
@@ -27,7 +30,7 @@ class CompensationSequenceTest extends StoreCase
         self::assertSame(0.0, $this->reservationSum($orderId, $stock));
         $rows = count($this->reservationRows($orderId));
 
-        $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
+        $this->appendExpectingBalanced($orderId, $stock, -1.0);
 
         self::assertCount($rows, $this->reservationRows($orderId), 'already balanced: nothing written');
         self::assertSame(0.0, $this->reservationSum($orderId, $stock));
@@ -39,7 +42,7 @@ class CompensationSequenceTest extends StoreCase
         $stock = $this->websiteStockId();
         $orderId = (int) $this->placeOrder(2.0)->getEntityId();
         // the inconsistency Magento's listing finds: the placement row gone
-        $this->connection()->delete($this->table('inventory_reservation'), ['sku = ?' => self::SKU]);
+        $this->dropPlacements();
         self::assertSame(0.0, $this->reservationSum($orderId, $stock));
 
         // -2 remains: more than that is refused with nothing written
@@ -65,9 +68,9 @@ class CompensationSequenceTest extends StoreCase
         $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
         self::assertSame(-2.0, $this->reservationSum($orderId, $stock), 'the second part balances the order');
 
-        // balanced: a further request of any size is "already balanced", nothing written, no exception
-        $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
-        $this->append([$this->manualCompensation($orderId, $stock, -3.0)]);
+        // balanced: a further request of any size is refused as "already balanced", nothing written
+        $this->appendExpectingBalanced($orderId, $stock, -1.0);
+        $this->appendExpectingBalanced($orderId, $stock, -3.0);
         self::assertSame(-2.0, $this->reservationSum($orderId, $stock), 'balanced: further requests write nothing');
         self::assertSame(['manual_compensation:' . $stock . ':-1.0', 'manual_compensation:' . $stock . ':-1.0'], $this->reservationEvents($orderId));
     }
@@ -80,18 +83,18 @@ class CompensationSequenceTest extends StoreCase
         $this->ship($orderId, $this->websiteSources()[0]);
         self::assertCount(2, $this->reservationRows($orderId));
 
-        self::$objectManager->get(\Magento\InventoryReservationsApi\Model\CleanupReservationsInterface::class)->execute();
+        self::$objectManager->get(CleanupReservationsInterface::class)->execute();
 
         self::assertSame([], $this->reservationRows($orderId), 'Magento deleted the balanced rows');
         self::assertSame('done', $this->obligationStatus($orderId), 'the obligation outlives the rows');
-        $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
+        $this->appendExpectingBalanced($orderId, $stock, -1.0);
         self::assertSame([], $this->reservationRows($orderId), 'a complete order with no rows is balanced: nothing written');
     }
 
     public function test_an_owed_order_is_left_out_of_the_inconsistency_listing_until_registered(): void
     {
         $this->requireInventory();
-        $class = \Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies::class;
+        $class = GetSalableQuantityInconsistencies::class;
         if (!class_exists($class)) {
             self::markTestSkipped('Magento_InventoryReservationCli is not installed');
         }
@@ -105,11 +108,10 @@ class CompensationSequenceTest extends StoreCase
         self::assertNotContains($incrementId, $this->listedInconsistencies(), 'registered: consistent');
     }
 
-    /** @return string[] the increment ids Magento's listing names
-     */
+    /** @return string[] the increment ids Magento's listing names */
     private function listedInconsistencies(): array
     {
-        $listing = self::$objectManager->get(\Magento\InventoryReservationCli\Model\GetSalableQuantityInconsistencies::class);
+        $listing = self::$objectManager->get(GetSalableQuantityInconsistencies::class);
         $ids = [];
         foreach ($listing->execute() as $page) {
             foreach ((array) $page as $inconsistency) {

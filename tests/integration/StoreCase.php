@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -14,6 +15,7 @@ use Hyva\InventoryOrderReservation\Model\OptionalInventory;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
+use Magento\Framework\Exception\CouldNotSaveException;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\Sales\Api\Data\OrderExtensionFactory;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -41,6 +43,13 @@ abstract class StoreCase extends TestCase
     /** A configurable in the Koti sample data and the child the composite cases sell. */
     protected const CONFIGURABLE_SKU = 'bedding-linen';
     protected const CHILD_SKU = 'bedding-linen-white';
+    /**
+     * An owed obligation no handler can take: every registration attempt
+     * the order's saves make fails and leaves it owed, which is the state
+     * a store in trouble leaves while the order is shipped, canceled or
+     * refunded. `releaseRegistration` gives it its mode back.
+     */
+    protected const MODE_HELD = 'held';
     /** The skus the base class puts back after every test. */
     private const RESTORED_SKUS = [self::SKU, self::CHILD_SKU];
     /** @var array<string, array<string, float>> sku => source code => quantity before the tests */
@@ -144,9 +153,16 @@ abstract class StoreCase extends TestCase
      */
     protected function placeOrder(float $qty = 1.0, bool $reserveStock = true, string $sku = self::SKU): OrderInterface
     {
-        $productId = $this->productId($sku);
+        return $this->placeOrderWithLines([$sku => $qty], $reserveStock);
+    }
+
+    /**
+     * @param array<string, float> $qtyBySku one simple line per sku
+     */
+    protected function placeOrderWithLines(array $qtyBySku, bool $reserveStock = true): OrderInterface
+    {
         $price = 10.0;
-        /** @var Order $order */
+        $totalQty = array_sum($qtyBySku);
         $order = self::$objectManager->create(Order::class);
         $order->setStoreId(1)
             ->setState(Order::STATE_NEW)
@@ -157,26 +173,25 @@ abstract class StoreCase extends TestCase
             ->setCustomerFirstname('Integration')
             ->setCustomerLastname('Test')
             ->setBaseCurrencyCode('EUR')->setOrderCurrencyCode('EUR')->setGlobalCurrencyCode('EUR')->setStoreCurrencyCode('EUR')
-            ->setSubtotal($price * $qty)->setBaseSubtotal($price * $qty)
-            ->setGrandTotal($price * $qty)->setBaseGrandTotal($price * $qty)
-            ->setTotalQtyOrdered($qty)
+            ->setSubtotal($price * $totalQty)->setBaseSubtotal($price * $totalQty)
+            ->setGrandTotal($price * $totalQty)->setBaseGrandTotal($price * $totalQty)
+            ->setTotalQtyOrdered($totalQty)
             ->setShippingMethod('flatrate_flatrate')
             ->setShippingDescription('Flat Rate');
-        /** @var Order\Item $item */
-        $item = self::$objectManager->create(Order\Item::class);
-        $item->setProductId($productId)->setProductType('simple')->setSku($sku)->setName($sku)
-            ->setQtyOrdered($qty)->setPrice($price)->setBasePrice($price)
-            ->setRowTotal($price * $qty)->setBaseRowTotal($price * $qty)->setIsVirtual(0)->setStoreId(1);
-        $order->addItem($item);
+        foreach ($qtyBySku as $sku => $qty) {
+            $item = self::$objectManager->create(Order\Item::class);
+            $item->setProductId($this->productId($sku))->setProductType('simple')->setSku($sku)->setName($sku)
+                ->setQtyOrdered($qty)->setPrice($price)->setBasePrice($price)
+                ->setRowTotal($price * $qty)->setBaseRowTotal($price * $qty)->setIsVirtual(0)->setStoreId(1);
+            $order->addItem($item);
+        }
         foreach (['billing', 'shipping'] as $type) {
-            /** @var Order\Address $address */
             $address = self::$objectManager->create(Order\Address::class);
             $address->setAddressType($type)->setFirstname('Integration')->setLastname('Test')
                 ->setStreet('Teststraat 1')->setCity('Heerlen')->setPostcode('6411AA')->setCountryId('NL')
                 ->setTelephone('0000000000')->setEmail('inventory-order-reservation@example.com');
             $type === 'billing' ? $order->setBillingAddress($address) : $order->setShippingAddress($address);
         }
-        /** @var Order\Payment $payment */
         $payment = self::$objectManager->create(Order\Payment::class);
         $payment->setMethod('checkmo');
         $order->setPayment($payment);
@@ -188,12 +203,6 @@ abstract class StoreCase extends TestCase
         return self::$objectManager->get(OrderRepositoryInterface::class)->save($order);
     }
 
-    /**
-     * An order for a configurable, as the checkout writes it: the parent
-     * line carries the chosen child's sku and the quantities, the child
-     * line hangs under it with the same sku and the progress Magento
-     * never books on it. Registration records the child.
-     */
     protected function placeConfigurableOrder(float $qty = 1.0, bool $reserveStock = true): OrderInterface
     {
         $price = 20.0;
@@ -374,14 +383,6 @@ abstract class StoreCase extends TestCase
         return $this->inventoryInstalled() ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY;
     }
 
-    /**
-     * An owed obligation no handler can take: every registration attempt
-     * the order's saves make fails and leaves it owed, which is the state
-     * a store in trouble leaves while the order is shipped, canceled or
-     * refunded. `releaseRegistration` gives it its mode back.
-     */
-    protected const MODE_HELD = 'held';
-
     protected function insertHeld(int $orderId, float $qty, string $sku = self::SKU): void
     {
         $this->insertOwed($orderId, $qty, $sku, self::MODE_HELD);
@@ -390,7 +391,7 @@ abstract class StoreCase extends TestCase
     protected function releaseRegistration(int $orderId): void
     {
         $this->connection()->update(
-            $this->table('hyva_inventory_order_stock_registration'),
+            $this->table(ObligationResource::TABLE),
             ['mode' => $this->storeMode()],
             ['order_id = ?' => $orderId, 'mode = ?' => self::MODE_HELD]
         );
@@ -403,7 +404,7 @@ abstract class StoreCase extends TestCase
     {
         $connection = $this->connection();
         return (int) $connection->fetchOne(
-            $connection->select()->from($this->table('hyva_inventory_order_stock_registration'), ['attempts'])
+            $connection->select()->from($this->table(ObligationResource::TABLE), ['attempts'])
                 ->where('order_id = ?', $orderId)->where('sku = ?', $sku)
         );
     }
@@ -411,6 +412,46 @@ abstract class StoreCase extends TestCase
     protected function register(int $orderId): bool
     {
         return self::$objectManager->get(StockRegistrationInterface::class)->register($orderId);
+    }
+
+    protected function refuse(int $orderId): void
+    {
+        self::$objectManager->get(ObligationResource::class)->markRefused($orderId);
+    }
+
+    /** @return int[] */
+    protected function orderIdsRefused(): array
+    {
+        return array_map('intval', self::$objectManager->get(ObligationResource::class)->orderIdsRefused());
+    }
+
+    /**
+     * Runs a bin/magento command as its own process, as an operator does:
+     * the command sets its own area code and reads its own standard input.
+     *
+     * @param string[] $arguments
+     * @return array{exit: int, out: string}
+     */
+    protected function runCommand(string $command, array $arguments = [], ?string $stdin = null): array
+    {
+        $root = self::magentoRoot();
+        $argv = [PHP_BINARY, $root . '/bin/magento', $command, ...$arguments];
+        $pipes = [];
+        // the command is the thing under test, as an operator runs it; an argv array, no shell
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $process = proc_open($argv, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $root);
+        self::assertIsResource($process);
+        if ($stdin !== null) {
+            fwrite($pipes[0], $stdin);
+        }
+        fclose($pipes[0]);
+        $out = (string) stream_get_contents($pipes[1]);
+        $err = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $exit = proc_close($process);
+        return ['exit' => $exit, 'out' => $out . $err];
     }
 
     // ---- stock
@@ -479,9 +520,18 @@ abstract class StoreCase extends TestCase
      */
     protected function manualCompensation(int $orderId, int $stockId, float $qty, string $sku = self::SKU): object
     {
+        return $this->reservationRow($orderId, $stockId, $qty, $sku, 'manual_compensation');
+    }
+
+    /**
+     * A reservation row naming the order under the given event type; a
+     * type other than manual_compensation passes the module's plugin by.
+     */
+    protected function reservationRow(int $orderId, int $stockId, float $qty, string $sku, string $eventType): object
+    {
         $builder = self::$objectManager->get(\Magento\InventoryReservationsApi\Model\ReservationBuilderInterface::class);
         return $builder->setSku($sku)->setStockId($stockId)->setQuantity($qty)
-            ->setMetadata(json_encode(['event_type' => 'manual_compensation', 'object_type' => 'order', 'object_id' => $orderId]))
+            ->setMetadata(json_encode(['event_type' => $eventType, 'object_type' => 'order', 'object_id' => $orderId]))
             ->build();
     }
 
@@ -492,6 +542,35 @@ abstract class StoreCase extends TestCase
     protected function append(array $reservations): void
     {
         self::$objectManager->get(\Magento\InventoryReservationsApi\Model\AppendReservationsInterface::class)->execute($reservations);
+    }
+
+    /**
+     * The Magento root the tests run against, inside the store's container.
+     */
+    protected static function magentoRoot(): string
+    {
+        return getenv('MAGENTO_ROOT') ?: '/var/www/html';
+    }
+
+    /**
+     * A manual compensation for a sku that owes nothing: refused as balanced, nothing written.
+     */
+    protected function appendExpectingBalanced(int $orderId, int $stockId, float $qty, string $sku = self::SKU): void
+    {
+        try {
+            $this->append([$this->manualCompensation($orderId, $stockId, $qty, $sku)]);
+            self::fail('an already balanced sku must refuse the request');
+        } catch (CouldNotSaveException $e) {
+            self::assertStringContainsString('already balanced, nothing written', $e->getMessage());
+        }
+    }
+
+    /**
+     * The sku's reservation rows gone: the inconsistency Magento's listing finds.
+     */
+    protected function dropPlacements(string $sku = self::SKU): void
+    {
+        $this->connection()->delete($this->table('inventory_reservation'), ['sku = ?' => $sku]);
     }
 
     protected function productId(string $sku): int

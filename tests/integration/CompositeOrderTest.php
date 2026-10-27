@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -39,9 +40,9 @@ class CompositeOrderTest extends StoreCase
         self::assertSame(-1.0, $remaining['expected'], 'one unit still to ship on the child, read off the parent');
         self::assertSame(0.0, $remaining['remaining'], 'the rows on record already say so');
 
-        // a stale compensation for the unit already shipped: balanced, nothing written
+        // a stale compensation for the unit already shipped: refused as balanced, nothing written
         $rows = count($this->reservationRows($orderId, self::CHILD_SKU));
-        $this->append([$this->manualCompensation($orderId, $stock, -1.0, self::CHILD_SKU)]);
+        $this->appendExpectingBalanced($orderId, $stock, -1.0, self::CHILD_SKU);
         self::assertCount($rows, $this->reservationRows($orderId, self::CHILD_SKU), 'already balanced: nothing written');
         self::assertSame(-1.0, $this->reservationSum($orderId, $stock, self::CHILD_SKU));
     }

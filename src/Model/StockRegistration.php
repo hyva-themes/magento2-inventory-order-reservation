@@ -1,5 +1,6 @@
 <?php
 /**
+ * Hyvä Themes - https://hyva.io
  * Copyright © Hyvä Themes. All rights reserved.
  * See COPYING.txt for license details.
  */
@@ -10,6 +11,7 @@ namespace Hyva\InventoryOrderReservation\Model;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Handler\RepairNeededException;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -30,7 +32,8 @@ use Psr\Log\LoggerInterface;
  */
 class StockRegistration implements StockRegistrationInterface
 {
-    /** @param HandlerInterface[] $handlers keyed by Obligation::MODE_*
+    /**
+     * @param HandlerInterface[] $handlers keyed by Obligation::MODE_*
      */
     public function __construct(
         private readonly OrderMutexInterface $orderMutex,
@@ -49,13 +52,18 @@ class StockRegistration implements StockRegistrationInterface
     public function register(int $orderId): bool
     {
         try {
-            return (bool) $this->orderMutex->execute($orderId, [$this, 'registerLocked'], [$orderId]);
+            return (bool) $this->orderMutex->execute($orderId, $this->registerLocked(...), [$orderId]);
         } catch (\Throwable $e) {
             // outside the rolled-back transaction: the attempt and its
             // reason, for the admin message and the console listing
             $attempts = $this->obligations->recordFailure($orderId, $e->getMessage());
             $context = ['order_id' => $orderId, 'attempts' => $attempts, 'exception' => $e->getMessage()];
-            if ($attempts >= Obligation::MAX_ATTEMPTS) {
+            if ($e instanceof RepairNeededException) {
+                // nothing to place: given up at once, so the listing names
+                // the order now and a compensation can repair it
+                $this->obligations->markRefused($orderId);
+                $this->logger->warning('Stock registration gave an order up: its rows need a compensation', $context);
+            } elseif ($attempts >= Obligation::MAX_ATTEMPTS) {
                 // given up: Magento's inconsistency listing shows the order
                 // again and a compensation settles it; `run <id>` tries once more
                 $this->obligations->markRefused($orderId);
@@ -65,7 +73,10 @@ class StockRegistration implements StockRegistrationInterface
             } else {
                 $this->logger->info('Stock registration failed again for order; it stays owed', $context);
             }
-            throw $e instanceof LocalizedException ? $e : new LocalizedException(__('%1', $e->getMessage()), $e);
+            // a database or runtime failure's text stays in the log and in last_error, not in a message the web API would show
+            throw $e instanceof LocalizedException
+                ? $e
+                : new LocalizedException(__('Stock registration for order %1 failed; inventory:order-reservation:list has the reason.', $orderId), $e);
         }
     }
 
@@ -75,10 +86,7 @@ class StockRegistration implements StockRegistrationInterface
      */
     public function registerLocked(int $orderId): bool
     {
-        $owed = array_values(array_filter(
-            $this->obligations->forOrder($orderId, forUpdate: true),
-            static fn (Obligation $obligation): bool => $obligation->isOwed()
-        ));
+        $owed = $this->obligations->owedForOrder($orderId, forUpdate: true);
         if ($owed === []) {
             return false;
         }

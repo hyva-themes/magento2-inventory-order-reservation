@@ -9,10 +9,13 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Test\Integration;
 
+use Magento\Framework\Exception\LocalizedException;
+
 /**
  * A compensation settles the sku it balances and nothing else: an order
  * the registration gave up on with two skus stays unresolved until each
- * sku has been repaired.
+ * sku has been repaired; and a registration retried after a partial
+ * repair places what is still missing, never the whole order again.
  */
 class PartialRepairTest extends StoreCase
 {
@@ -46,5 +49,60 @@ class PartialRepairTest extends StoreCase
         self::assertSame('done', $this->obligationStatus($orderId, self::CHILD_SKU));
         self::assertNotContains($orderId, $this->orderIdsRefused(), 'every sku settled: no longer listed');
         self::assertSame(-1.0, $this->reservationSum($orderId, $stock, self::CHILD_SKU));
+    }
+
+    public function test_a_retried_registration_places_only_what_a_partial_compensation_left(): void
+    {
+        $this->requireInventory();
+        $stock = $this->websiteStockId();
+        $orderId = (int) $this->placeOrder(3.0, reserveStock: false)->getEntityId();
+        $this->insertOwed($orderId, 3.0);
+        $this->refuse($orderId);
+
+        // one unit repaired by hand: partial, two still missing, the sku keeps its discrepancy
+        $this->append([$this->manualCompensation($orderId, $stock, -1.0)]);
+        self::assertSame(-1.0, $this->reservationSum($orderId, $stock));
+        self::assertSame('refused', $this->obligationStatus($orderId));
+
+        // the retry the listing suggests: the registration places the two still missing, not the three ordered
+        $run = $this->runCommand('inventory:order-reservation:run', [(string) $orderId]);
+        self::assertSame(0, $run['exit'], $run['out']);
+        self::assertStringContainsString(sprintf('order %d: registered', $orderId), $run['out']);
+        self::assertSame(-3.0, $this->reservationSum($orderId, $stock), 'three ordered, three reserved');
+        self::assertSame(['manual_compensation:' . $stock . ':-1.0', 'order_placed:' . $stock . ':-2.0'], $this->reservationEvents($orderId));
+        self::assertSame('done', $this->obligationStatus($orderId));
+        self::assertSame('registration', $this->obligations($orderId)[0]->settledBy);
+        self::assertFalse($this->register($orderId), 'nothing left owed');
+    }
+
+    public function test_a_sku_reserved_past_what_the_order_owes_is_given_up_on_at_once_and_a_compensation_repairs_it(): void
+    {
+        $this->requireInventory();
+        $stock = $this->websiteStockId();
+        $orderId = (int) $this->placeOrder(3.0, reserveStock: false)->getEntityId();
+        $this->insertOwed($orderId, 3.0);
+        // a stray placement of four for the three ordered, written before the registration ran
+        $this->append([$this->reservationRow($orderId, $stock, -4.0, self::SKU, 'order_placed')]);
+        self::assertSame(-4.0, $this->reservationSum($orderId, $stock));
+
+        // nothing a placement can fix: given up at once, with the reason, nothing written
+        try {
+            $this->register($orderId);
+            self::fail('a surplus must be given up on');
+        } catch (LocalizedException $e) {
+            self::assertStringContainsString('reserved +1.0000 past what the order owes', $e->getMessage());
+        }
+        self::assertSame(-4.0, $this->reservationSum($orderId, $stock), 'nothing written');
+        self::assertSame('refused', $this->obligationStatus($orderId), 'given up at once, not after the attempt limit');
+        self::assertSame(1, $this->obligationAttempts($orderId));
+        self::assertStringContainsString('reserved +1.0000 past', (string) $this->obligations($orderId)[0]->lastError);
+        self::assertContains($orderId, $this->orderIdsRefused(), 'listed for repair');
+
+        // the compensation the reason names: applied, the sku settled, the order off the list
+        $this->append([$this->manualCompensation($orderId, $stock, 1.0)]);
+        self::assertSame(-3.0, $this->reservationSum($orderId, $stock), 'three ordered, three reserved');
+        self::assertSame('done', $this->obligationStatus($orderId));
+        self::assertSame('compensation', $this->obligations($orderId)[0]->settledBy);
+        self::assertNotContains($orderId, $this->orderIdsRefused());
     }
 }

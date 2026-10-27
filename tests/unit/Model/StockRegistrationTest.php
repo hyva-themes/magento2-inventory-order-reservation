@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
 
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Handler\RepairNeededException;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Hyva\InventoryOrderReservation\Model\StockRegistration;
@@ -74,6 +75,22 @@ class StockRegistrationTest extends TestCase
         $handler = $this->createMock(HandlerInterface::class);
         $handler->method('register')->willThrowException(new LocalizedException(__('Some of the products are out of stock.')));
         $this->expectException(LocalizedException::class);
+        $this->registration($resource, $handler)->register(9);
+    }
+
+    public function test_a_discrepancy_only_a_compensation_repairs_gives_the_order_up_at_once(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 3.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('owedForOrder')->willReturn([$owed]);
+        $resource->method('isOneConnection')->willReturn(true);
+        $resource->expects(self::never())->method('markDone');
+        $resource->expects(self::once())->method('recordFailure')->with(9, self::stringContains('reserved +1.0000 past'))->willReturn(1);
+        $resource->expects(self::once())->method('markRefused')->with(9);
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->method('register')->willThrowException(new RepairNeededException(__('Sku mug is reserved +1.0000 past what the order owes on stock 2')));
+
+        $this->expectException(RepairNeededException::class);
         $this->registration($resource, $handler)->register(9);
     }
 

@@ -11,6 +11,7 @@ namespace Hyva\InventoryOrderReservation\Model;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Handler\RepairNeededException;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -57,7 +58,12 @@ class StockRegistration implements StockRegistrationInterface
             // reason, for the admin message and the console listing
             $attempts = $this->obligations->recordFailure($orderId, $e->getMessage());
             $context = ['order_id' => $orderId, 'attempts' => $attempts, 'exception' => $e->getMessage()];
-            if ($attempts >= Obligation::MAX_ATTEMPTS) {
+            if ($e instanceof RepairNeededException) {
+                // nothing to place: given up at once, so the listing names
+                // the order now and a compensation can repair it
+                $this->obligations->markRefused($orderId);
+                $this->logger->warning('Stock registration gave an order up: its rows need a compensation', $context);
+            } elseif ($attempts >= Obligation::MAX_ATTEMPTS) {
                 // given up: Magento's inconsistency listing shows the order
                 // again and a compensation settles it; `run <id>` tries once more
                 $this->obligations->markRefused($orderId);

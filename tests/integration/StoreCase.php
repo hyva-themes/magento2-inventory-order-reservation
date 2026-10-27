@@ -520,9 +520,18 @@ abstract class StoreCase extends TestCase
      */
     protected function manualCompensation(int $orderId, int $stockId, float $qty, string $sku = self::SKU): object
     {
+        return $this->reservationRow($orderId, $stockId, $qty, $sku, 'manual_compensation');
+    }
+
+    /**
+     * A reservation row naming the order under the given event type; a
+     * type other than manual_compensation passes the module's plugin by.
+     */
+    protected function reservationRow(int $orderId, int $stockId, float $qty, string $sku, string $eventType): object
+    {
         $builder = self::$objectManager->get(\Magento\InventoryReservationsApi\Model\ReservationBuilderInterface::class);
         return $builder->setSku($sku)->setStockId($stockId)->setQuantity($qty)
-            ->setMetadata(json_encode(['event_type' => 'manual_compensation', 'object_type' => 'order', 'object_id' => $orderId]))
+            ->setMetadata(json_encode(['event_type' => $eventType, 'object_type' => 'order', 'object_id' => $orderId]))
             ->build();
     }
 

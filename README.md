@@ -91,6 +91,10 @@ composer require hyva-themes/magento2-inventory-order-reservation-msi
 
 This package itself has no dependency on MSI, and none on any other Hyvä package. It installs on a store without MSI and takes the legacy path there.
 
+### Updating with Hyvä POS
+
+Hyvä POS (`Hyva_Pos`) plugs into the companion's handler to assign the register's sources before a placement. Update the POS module and these packages together: an older `Hyva_Pos` with these 1.0 packages leaves that step unplugged, because the handler it targets moved to the companion; and these packages with the new `Hyva_Pos` but without the companion leave an MSI store's orders owed until the companion is installed, which the admin message tells you.
+
 ## Without Magento Inventory
 
 On a store without MSI the module registers the sale on the legacy stock item, the way the checkout does. From there on everything is Magento's own legacy behaviour:

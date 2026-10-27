@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -19,16 +19,11 @@ use Magento\Store\Api\WebsiteRepositoryInterface;
  */
 class ObligationRecorder
 {
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     * @param OptionalInventory $inventory
-     * @param WebsiteRepositoryInterface $websiteRepository
-     */
     public function __construct(
         private readonly ObligationResource $obligations,
         private readonly OptionalInventory $inventory,
-        private readonly WebsiteRepositoryInterface $websiteRepository
+        private readonly WebsiteRepositoryInterface $websiteRepository,
+        private readonly ProductIdentities $products
     ) {
     }
 
@@ -47,8 +42,6 @@ class ObligationRecorder
     /**
      * Whether the order's obligation was recorded already: the rows exist.
      *
-     * @param OrderInterface $order
-     * @return bool
      */
     public function isRecorded(OrderInterface $order): bool
     {
@@ -67,57 +60,46 @@ class ObligationRecorder
                 (string) $this->websiteRepository->getById($websiteId)->getCode()
             );
         }
-        $qtyBySku = [];
-        $typeBySku = [];
+        // As Magento's own placement does (AppendReservationsAfterOrderPlacementPlugin):
+        // the quantity ordered per product id, every line counted, then the
+        // sku and type the catalog gives that product. A composite product
+        // (configurable, bundle, grouped) has no stock of its own and its
+        // children carry theirs, so its line is left out, whether or not the
+        // payload named parent and child. A product the catalog no longer
+        // holds keeps the line's own sku and type.
+        $qtyByProduct = [];
+        $lineSku = [];
+        $lineType = [];
         foreach ($order->getItems() as $item) {
-            $sku = (string) $item->getSku();
-            if ($sku === '' || (float) $item->getQtyOrdered() <= 0) {
+            $productId = (int) $item->getProductId();
+            $qty = (float) $item->getQtyOrdered();
+            if ($productId <= 0 || $qty <= 0) {
                 continue;
             }
-            // a configurable or bundle parent carries its children's skus
-            // under its own type; the child rows carry the quantity that
-            // leaves the shelf. The parent row is skipped so the child's
-            // sku is counted once, at the child's own type.
-            if ($item->getParentItemId() === null && $this->hasChildren($order, $item)) {
-                continue;
-            }
-            $qtyBySku[$sku] = ($qtyBySku[$sku] ?? 0.0) + (float) $item->getQtyOrdered();
-            if (!isset($typeBySku[$sku])) {
-                $typeBySku[$sku] = (string) $item->getProductType();
-            }
+            $qtyByProduct[$productId] = ($qtyByProduct[$productId] ?? 0.0) + $qty;
+            $lineSku[$productId] ??= (string) $item->getSku();
+            $lineType[$productId] ??= (string) $item->getProductType();
         }
+        $identities = $this->products->byProductIds(array_keys($qtyByProduct));
         $rows = [];
-        foreach ($qtyBySku as $sku => $qty) {
+        foreach ($qtyByProduct as $productId => $qty) {
+            $sku = $identities[$productId]['sku'] ?? $lineSku[$productId];
+            $type = $identities[$productId]['type'] ?? $lineType[$productId];
+            if ($sku === '' || ProductIdentities::isComposite($type)) {
+                continue;
+            }
             $rows[] = new Obligation(
                 (int) $order->getEntityId(),
-                (string) $sku,
-                $typeBySku[$sku] !== '' ? $typeBySku[$sku] : null,
+                $sku,
+                $type !== '' ? $type : null,
                 $qty,
                 $websiteId,
                 $stockId,
-                $mode
+                $mode,
+                productId: $productId
             );
         }
         $this->obligations->insert($rows);
         return $rows;
-    }
-
-    /**
-     * Whether the line is a parent whose children carry the quantities (a configurable, a bundle).
-     * @param OrderInterface $order
-     * @param object $parent
-     * @return bool
-     */
-    private function hasChildren(OrderInterface $order, object $parent): bool
-    {
-        foreach ($order->getItems() as $item) {
-            if ($item->getParentItemId() !== null && (int) $item->getParentItemId() === (int) $parent->getItemId()) {
-                return true;
-            }
-            if (method_exists($item, 'getParentItem') && $item->getParentItem() === $parent) {
-                return true;
-            }
-        }
-        return false;
     }
 }

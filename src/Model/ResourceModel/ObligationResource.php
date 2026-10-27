@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -19,12 +19,8 @@ use Magento\Framework\DB\Adapter\AdapterInterface;
  */
 class ObligationResource
 {
-    public const TABLE = 'inventory_order_stock_registration';
+    public const TABLE = 'hyva_inventory_order_stock_registration';
 
-    /**
-     * Constructor.
-     * @param ResourceConnection $resourceConnection
-     */
     public function __construct(
         private readonly ResourceConnection $resourceConnection
     ) {
@@ -59,6 +55,7 @@ class ObligationResource
         foreach ($obligations as $obligation) {
             $rows[] = [
                 'order_id' => $obligation->orderId,
+                'product_id' => $obligation->productId,
                 'sku' => $obligation->sku,
                 'product_type' => $obligation->productType,
                 'qty_ordered' => $obligation->qtyOrdered,
@@ -74,8 +71,6 @@ class ObligationResource
     /**
      * Whether the order has obligation rows on record, any status.
      *
-     * @param int $orderId
-     * @return bool
      */
     public function hasRowsFor(int $orderId): bool
     {
@@ -86,19 +81,21 @@ class ObligationResource
 
     /**
      * The order's obligations, every status, for reading under the lock.
-     * @return Obligation[]
      */
-    public function forOrder(int $orderId): array
+    public function forOrder(int $orderId, bool $forUpdate = false): array
     {
         $connection = $this->connection();
         $select = $connection->select()->from($this->table())->where('order_id = ?', $orderId)->order('entity_id');
+        if ($forUpdate) {
+            // read under the lock a caller's outer transaction already holds
+            $select->forUpdate(true);
+        }
         return array_map([$this, 'fromRow'], $connection->fetchAll($select));
     }
 
     /**
      * Ids of orders with an obligation still owed, created before `$before`
      * (a database timestamp), oldest first.
-     * @return int[]
      */
     public function orderIdsOwed(string $before, int $limit = 200): array
     {
@@ -107,8 +104,11 @@ class ObligationResource
             ->distinct()
             ->from($this->table(), ['order_id'])
             ->where('status = ?', Obligation::STATUS_OWED)
+            ->where('attempts < ?', Obligation::MAX_ATTEMPTS)
             ->where('created_at < ?', $before)
-            ->order('created_at')
+            // the orders tried least first, so a few that keep failing never
+            // hold the rest back
+            ->order(['attempts', 'created_at'])
             ->limit($limit);
         return array_map('intval', $connection->fetchCol($select));
     }
@@ -125,7 +125,15 @@ class ObligationResource
             ->from($this->table(), ['count' => 'COUNT(DISTINCT order_id)', 'oldest' => 'MIN(created_at)'])
             ->where('status = ?', Obligation::STATUS_OWED);
         $row = $connection->fetchRow($select) ?: ['count' => 0, 'oldest' => null];
-        return ['count' => (int) $row['count'], 'oldest' => $row['oldest'] ?: null];
+        $refused = $connection->select()
+            ->from($this->table(), ['count' => 'COUNT(DISTINCT order_id)'])
+            ->where('status = ?', Obligation::STATUS_REFUSED);
+
+        return [
+            'count' => (int) $row['count'],
+            'oldest' => $row['oldest'] ?: null,
+            'refused' => (int) $connection->fetchOne($refused),
+        ];
     }
 
     /**
@@ -141,7 +149,7 @@ class ObligationResource
                 'completed_at' => new \Zend_Db_Expr('CURRENT_TIMESTAMP'),
                 'last_error' => null,
             ],
-            ['order_id = ?' => $orderId, 'status = ?' => Obligation::STATUS_OWED]
+            ['order_id = ?' => $orderId, 'status IN (?)' => [Obligation::STATUS_OWED, Obligation::STATUS_REFUSED]]
         );
     }
 
@@ -149,9 +157,10 @@ class ObligationResource
      * Records a failed attempt, outside the rolled-back transaction, so the
      * admin message can name the reason.
      */
-    public function recordFailure(int $orderId, string $error): void
+    public function recordFailure(int $orderId, string $error): int
     {
-        $this->connection()->update(
+        $connection = $this->connection();
+        $connection->update(
             $this->table(),
             [
                 'attempts' => new \Zend_Db_Expr('attempts + 1'),
@@ -159,12 +168,60 @@ class ObligationResource
             ],
             ['order_id = ?' => $orderId, 'status = ?' => Obligation::STATUS_OWED]
         );
+        $select = $connection->select()
+            ->from($this->table(), ['attempts' => 'MAX(attempts)'])
+            ->where('order_id = ?', $orderId)
+            ->where('status = ?', Obligation::STATUS_OWED);
+
+        return (int) $connection->fetchOne($select);
+    }
+
+    /**
+     * The registration gives the order up: its rows leave the owed set
+     * (Magento's inconsistency listing shows the order again, a
+     * compensation can settle it) and keep the last reason.
+     */
+    public function markRefused(int $orderId): void
+    {
+        $this->connection()->update(
+            $this->table(),
+            ['status' => Obligation::STATUS_REFUSED],
+            ['order_id = ?' => $orderId, 'status = ?' => Obligation::STATUS_OWED]
+        );
+    }
+
+    /**
+     * A refused order is tried again: owed, with its attempts counted afresh.
+     */
+    public function reopen(int $orderId): void
+    {
+        $this->connection()->update(
+            $this->table(),
+            ['status' => Obligation::STATUS_OWED, 'attempts' => 0],
+            ['order_id = ?' => $orderId, 'status = ?' => Obligation::STATUS_REFUSED]
+        );
+    }
+
+    /**
+     * Ids of orders the registration gave up on.
+     *
+     */
+    public function orderIdsRefused(int $limit = 200): array
+    {
+        $connection = $this->connection();
+        $select = $connection->select()
+            ->distinct()
+            ->from($this->table(), ['order_id'])
+            ->where('status = ?', Obligation::STATUS_REFUSED)
+            ->order('created_at')
+            ->limit($limit);
+
+        return array_map('intval', $connection->fetchCol($select));
     }
 
     /**
      * The obligation table's name with the store's prefix.
      *
-     * @return string
      */
     private function table(): string
     {
@@ -186,7 +243,8 @@ class ObligationResource
             (string) $row['status'],
             $row['settled_by'] !== null ? (string) $row['settled_by'] : null,
             (int) $row['attempts'],
-            $row['last_error'] !== null ? (string) $row['last_error'] : null
+            $row['last_error'] !== null ? (string) $row['last_error'] : null,
+            isset($row['product_id']) && $row['product_id'] !== null ? (int) $row['product_id'] : null
         );
     }
 }

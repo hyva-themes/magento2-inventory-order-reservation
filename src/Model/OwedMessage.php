@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -20,10 +20,6 @@ class OwedMessage implements MessageInterface
 {
     public const OWED_FOR_SECONDS = 3600;
 
-    /**
-     * Constructor.
-     * @param ObligationResource $obligations
-     */
     public function __construct(
         private readonly ObligationResource $obligations
     ) {
@@ -32,7 +28,6 @@ class OwedMessage implements MessageInterface
     /**
      * The message's identity for the admin notification list.
      *
-     * @return string
      */
     public function getIdentity(): string
     {
@@ -42,11 +37,13 @@ class OwedMessage implements MessageInterface
     /**
      * Shown while an obligation has been owed longer than an hour.
      *
-     * @return bool
      */
     public function isDisplayed(): bool
     {
         $summary = $this->obligations->owedSummary();
+        if ($summary['refused'] > 0) {
+            return true;
+        }
         if ($summary['count'] === 0 || $summary['oldest'] === null) {
             return false;
         }
@@ -56,11 +53,19 @@ class OwedMessage implements MessageInterface
     /**
      * The count of owed orders, the oldest, and the commands that settle them.
      *
-     * @return string
      */
     public function getText(): string
     {
         $summary = $this->obligations->owedSummary();
+        if ($summary['refused'] > 0) {
+            return (string) __(
+                'The stock registration of %1 order(s) created through the API was given up after repeated failures, and %2 still owe it. '
+                . 'Read bin/magento inventory:order-reservation:list for the reasons; inventory:order-reservation:run <order id> tries one again, '
+                . 'and a compensation through inventory:reservation:create-compensations settles it.',
+                $summary['refused'],
+                $summary['count']
+            );
+        }
         return (string) __(
             '%1 order(s) created through the API still owe their stock registration (oldest since %2). '
             . 'Run bin/magento inventory:order-reservation:run, and read bin/magento inventory:order-reservation:list '
@@ -73,7 +78,6 @@ class OwedMessage implements MessageInterface
     /**
      * Major: the website sells stock that left the shop until this is settled.
      *
-     * @return int
      */
     public function getSeverity(): int
     {

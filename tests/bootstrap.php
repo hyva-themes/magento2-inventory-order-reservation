@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  *
  * Bootstrap for the module's standalone unit tests: Magento's vendor
  * autoloader for the framework interfaces the mocks reference, found

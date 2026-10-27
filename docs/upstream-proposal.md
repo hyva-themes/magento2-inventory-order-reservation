@@ -10,7 +10,7 @@ Any integration that creates orders this way and ships them (a point of sale, an
 
 ## Why not reroute the create endpoint
 
-The reporter's patch points `/V1/orders/create` at `OrderService::place()`. That runs the full placement lifecycle (payment placement, the place events, every observer a store's modules hang on them) for every order created through the API, which changes behaviour for every existing integration, ERP imports of already-shipped orders included. Stores that manage stock in an ERP install modules to disable reservations altogether; they must not gain any.
+The reporter's patch points `/V1/orders/create` at `OrderService::place()`. That runs the full placement lifecycle (payment placement, the place events, every observer a store's modules hang on them) for every order created through the API, which changes behavior for every existing integration, ERP imports of already-shipped orders included. Stores that manage stock in an ERP install modules to disable reservations altogether; they must not gain any.
 
 ## The proposal: an opt-in stock registration
 
@@ -21,7 +21,7 @@ One boolean extension attribute on the order, `reserve_stock`, absent by default
 
 The obligation is recorded with the order in its own save (one row per sku with the quantity ordered at creation), and registered after the commit under `OrderMutexInterface`, in one transaction with the completion marker: a failure rolls both back and the obligation stays owed; recovery on the order's next save, by cron, and by a console command; an admin message when an obligation is owed longer than an hour.
 
-Magento's repair tools are coordinated rather than bypassed: a manual compensation naming such an order completes the registration first and is read against the order's remaining inconsistency by the existing rule (ordered less cancelled, refunded, shipped; zero in a final state); the inconsistency listing leaves owed orders out; the compensation command reports per row what happened and exits non-zero on a refusal.
+Magento's repair tools are coordinated rather than bypassed: a manual compensation naming such an order completes the registration first and is read against the order's remaining inconsistency by the existing rule (ordered less canceled, refunded, shipped; zero in a final state); the inconsistency listing leaves owed orders out; the compensation command reports per row what happened and exits non-zero on a refusal.
 
 ## Shape of the upstream change
 

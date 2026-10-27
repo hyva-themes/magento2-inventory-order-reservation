@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -54,10 +54,25 @@ class StockRegistrationTest extends TestCase
         $resource->method('forOrder')->willReturn([$owed]);
         $resource->method('isOneConnection')->willReturn(true);
         $resource->expects(self::never())->method('markDone');
-        $resource->expects(self::once())->method('recordFailure')->with(9, 'Inventory refused');
+        $resource->expects(self::once())->method('recordFailure')->with(9, 'Inventory refused')->willReturn(1);
+        $resource->expects(self::never())->method('markRefused');
         $handler = $this->createMock(HandlerInterface::class);
         $handler->method('register')->willThrowException(new LocalizedException(__('Inventory refused')));
 
+        $this->expectException(LocalizedException::class);
+        $this->registration($resource, $handler, locked: true)->register(9);
+    }
+
+    public function test_the_last_allowed_failure_gives_the_order_up(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->createMock(ObligationResource::class);
+        $resource->method('forOrder')->willReturn([$owed]);
+        $resource->method('isOneConnection')->willReturn(true);
+        $resource->method('recordFailure')->willReturn(Obligation::MAX_ATTEMPTS);
+        $resource->expects(self::once())->method('markRefused')->with(9);
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->method('register')->willThrowException(new LocalizedException(__('Some of the products are out of stock.')));
         $this->expectException(LocalizedException::class);
         $this->registration($resource, $handler, locked: true)->register(9);
     }

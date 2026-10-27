@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -21,7 +21,7 @@ use Psr\Log\LoggerInterface;
  *
  * `OrderMutex::execute` opens a transaction on the sales connection and
  * locks the order row (SELECT … FOR UPDATE), so two runners for one order
- * are serialised: the second reads the rows after the first committed and
+ * are serialized: the second reads the rows after the first committed and
  * finds nothing owed. The handler's inventory write and the completion
  * marker are in that one transaction; a failure anywhere rolls both back
  * and the obligation stays owed. That holds only when the sales
@@ -43,7 +43,6 @@ class StockRegistration implements StockRegistrationInterface
 
     /**
      * Registers what the order still owes under its lock; records a failed attempt outside the rolled-back transaction and rethrows.
-     * @param int $orderId
      * @return bool true when this call wrote the stock
      * @throws LocalizedException
      */
@@ -54,11 +53,18 @@ class StockRegistration implements StockRegistrationInterface
         } catch (\Throwable $e) {
             // outside the rolled-back transaction: the attempt and its
             // reason, for the admin message and the console listing
-            $this->obligations->recordFailure($orderId, $e->getMessage());
-            $this->logger->warning('Stock registration failed for order; it stays owed', [
-                'order_id' => $orderId,
-                'exception' => $e->getMessage(),
-            ]);
+            $attempts = $this->obligations->recordFailure($orderId, $e->getMessage());
+            $context = ['order_id' => $orderId, 'attempts' => $attempts, 'exception' => $e->getMessage()];
+            if ($attempts >= Obligation::MAX_ATTEMPTS) {
+                // given up: Magento's inconsistency listing shows the order
+                // again and a compensation settles it; `run <id>` tries once more
+                $this->obligations->markRefused($orderId);
+                $this->logger->warning('Stock registration gave up on order after repeated failures', $context);
+            } elseif ($attempts <= 1) {
+                $this->logger->warning('Stock registration failed for order; it stays owed', $context);
+            } else {
+                $this->logger->info('Stock registration failed again for order; it stays owed', $context);
+            }
             throw $e instanceof LocalizedException ? $e : new LocalizedException(__('%1', $e->getMessage()), $e);
         }
     }
@@ -70,7 +76,7 @@ class StockRegistration implements StockRegistrationInterface
     public function registerLocked(int $orderId): bool
     {
         $owed = array_values(array_filter(
-            $this->obligations->forOrder($orderId),
+            $this->obligations->forOrder($orderId, forUpdate: true),
             static fn (Obligation $obligation): bool => $obligation->isOwed()
         ));
         if ($owed === []) {

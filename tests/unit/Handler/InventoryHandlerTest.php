@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -20,7 +20,7 @@ use PHPUnit\Framework\TestCase;
 
 class InventoryHandlerTest extends TestCase
 {
-    public function test_one_item_to_sell_per_managed_sku_at_minus_the_ordered_quantity_under_an_order_placed_event(): void
+    public function test_one_item_to_sell_per_sku_at_minus_the_ordered_quantity_under_an_order_placed_event(): void
     {
         $placed = [];
         $inventory = $this->inventory($placed, managed: static fn (string $type): bool => $type !== 'bundle');
@@ -35,7 +35,9 @@ class InventoryHandlerTest extends TestCase
 
         self::assertCount(1, $placed);
         [$items, $channel, $event] = $placed[0];
-        self::assertSame([['sku' => 'mug', 'qty' => -2.0]], $items);
+        // the recorder leaves composite products out; Magento's placement
+        // reads each sku's type from the catalog, so nothing is filtered here
+        self::assertSame([['sku' => 'mug', 'qty' => -2.0], ['sku' => 'kit', 'qty' => -1.0]], $items);
         self::assertSame(['type' => 'website', 'code' => 'base'], $channel);
         self::assertSame(['type' => 'order_placed', 'objectType' => 'order', 'objectId' => '9'], $event);
     }

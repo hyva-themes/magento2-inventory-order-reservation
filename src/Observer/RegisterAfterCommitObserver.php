@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -25,12 +25,6 @@ use Psr\Log\LoggerInterface;
  */
 class RegisterAfterCommitObserver implements ObserverInterface
 {
-    /**
-     * Constructor.
-     * @param StockRegistrationInterface $registration
-     * @param ObligationResource $obligations
-     * @param LoggerInterface $logger
-     */
     public function __construct(
         private readonly StockRegistrationInterface $registration,
         private readonly ObligationResource $obligations,
@@ -40,8 +34,6 @@ class RegisterAfterCommitObserver implements ObserverInterface
 
     /**
      * Registers what the saved order still owes, after its commit; a failure is logged and never fails the save.
-     * @param Observer $observer
-     * @return void
      */
     public function execute(Observer $observer): void
     {
@@ -56,7 +48,8 @@ class RegisterAfterCommitObserver implements ObserverInterface
         try {
             $this->registration->register($orderId);
         } catch (\Throwable $e) {
-            $this->logger->warning('Stock registration after the order save failed; the obligation stays owed', [
+            // the registration logged the failure itself
+            $this->logger->debug('Stock registration after the order save failed; the obligation stays owed', [
                 'order_id' => $orderId,
                 'exception' => $e->getMessage(),
             ]);
@@ -65,8 +58,6 @@ class RegisterAfterCommitObserver implements ObserverInterface
 
     /**
      * Whether any of the order's obligations is still owed.
-     * @param int $orderId
-     * @return bool
      */
     private function owesAnything(int $orderId): bool
     {

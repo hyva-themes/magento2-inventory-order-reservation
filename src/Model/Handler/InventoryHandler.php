@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -25,11 +25,6 @@ class InventoryHandler implements HandlerInterface
 {
     public const EVENT_ORDER_PLACED = 'order_placed';
 
-    /**
-     * Constructor.
-     * @param OptionalInventory $inventory
-     * @param WebsiteRepositoryInterface $websiteRepository
-     */
     public function __construct(
         private readonly OptionalInventory $inventory,
         private readonly WebsiteRepositoryInterface $websiteRepository
@@ -38,9 +33,6 @@ class InventoryHandler implements HandlerInterface
 
     /**
      * Places the order_placed reservation for the owed skus through Inventory's sales-event service.
-     * @param OrderInterface $order
-     * @param Obligation[] $owed
-     * @return void
      * @throws LocalizedException when Inventory is not available
      */
     public function register(OrderInterface $order, array $owed): void
@@ -50,19 +42,16 @@ class InventoryHandler implements HandlerInterface
         $channelFactory = $this->inventory->salesChannelFactory();
         $eventFactory = $this->inventory->salesEventFactory();
         $extensionFactory = $this->inventory->salesEventExtensionFactory();
-        $managed = $this->inventory->isSourceItemManagementAllowedForProductType();
         if ($place === null || $itemFactory === null || $channelFactory === null
-            || $eventFactory === null || $extensionFactory === null || $managed === null
+            || $eventFactory === null || $extensionFactory === null
         ) {
             throw new LocalizedException(__('Magento Inventory is not available on this store.'));
         }
         $items = [];
+        // PlaceReservationsForSalesEvent reads each sku's type from the
+        // catalog and leaves out what holds no stock of its own, as it does
+        // for the checkout; nothing is filtered here.
         foreach ($owed as $obligation) {
-            if ($obligation->productType !== null && $obligation->productType !== ''
-                && !$managed->execute($obligation->productType)
-            ) {
-                continue;
-            }
             if ($obligation->qtyOrdered <= 0) {
                 continue;
             }

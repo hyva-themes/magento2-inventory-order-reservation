@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  *
  * Bootstrap for the integration tests: a live Magento, found through
  * MAGENTO_ROOT (default /var/www/html), booted the way bin/magento is.

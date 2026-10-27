@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -37,15 +37,6 @@ class CoordinatedCompensation
     /** @var bool while the service itself writes, so its writer plugin passes the row through */
     private bool $writing = false;
 
-    /**
-     * Constructor.
-     * @param OrderMutexInterface $orderMutex
-     * @param StockRegistration $registration
-     * @param OrderRepositoryInterface $orderRepository
-     * @param RemainingInconsistency $remaining
-     * @param OptionalInventory $inventory
-     * @param ObligationResource $obligations
-     */
     public function __construct(
         private readonly OrderMutexInterface $orderMutex,
         private readonly StockRegistration $registration,
@@ -59,7 +50,6 @@ class CoordinatedCompensation
     /**
      * Whether the service is appending its own validated row right now, so the writer plugin lets it through.
      *
-     * @return bool
      */
     public function isWriting(): bool
     {
@@ -76,7 +66,6 @@ class CoordinatedCompensation
 
     /**
      * The locked part.
-     * @param object $reservation
      */
     public function applyLocked(int $orderId, object $reservation): Outcome
     {
@@ -116,13 +105,13 @@ class CoordinatedCompensation
         }
         $state = $this->remaining->forOrderSku($order, $sku, $obligation->stockId);
         $remaining = $state['remaining'];
-        if (abs($remaining) < 0.00005) {
+        if (abs($remaining) < Obligation::TOLERANCE) {
             return new Outcome(Outcome::ALREADY_BALANCED, $sku, $stockId, $requested, 0.0, 0.0, $ran);
         }
-        if ($requested == 0.0 || ($requested < 0) !== ($remaining < 0)) {
+        if (abs($requested) < Obligation::TOLERANCE || ($requested < 0) !== ($remaining < 0)) {
             return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, $remaining, $remaining, $ran, 'wrong direction');
         }
-        if (abs($requested) > abs($remaining) + 0.00005) {
+        if (abs($requested) > abs($remaining) + Obligation::TOLERANCE) {
             return new Outcome(Outcome::REFUSED, $sku, $stockId, $requested, $remaining, $remaining, $ran, 'more than remains');
         }
         $writer = $this->inventory->appendReservations();
@@ -136,8 +125,12 @@ class CoordinatedCompensation
             $this->writing = false;
         }
         $after = round($remaining - $requested, 4);
+        if ($obligation->isRefused() && abs($after) < Obligation::TOLERANCE) {
+            // the registration gave the order up; this compensation settled it
+            $this->obligations->markDone($orderId, Obligation::SETTLED_BY_COMPENSATION);
+        }
         return new Outcome(
-            abs($after) < 0.00005 ? Outcome::APPLIED : Outcome::PARTIAL,
+            abs($after) < Obligation::TOLERANCE ? Outcome::APPLIED : Outcome::PARTIAL,
             $sku,
             $stockId,
             $requested,
@@ -150,9 +143,6 @@ class CoordinatedCompensation
     /**
      * The order's persisted obligation for the sku, the row the request is held against.
      *
-     * @param int $orderId
-     * @param string $sku
-     * @return Obligation|null
      */
     private function obligationFor(int $orderId, string $sku): ?Obligation
     {

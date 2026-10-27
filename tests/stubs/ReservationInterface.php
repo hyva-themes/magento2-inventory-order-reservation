@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  *
  * The shape of Magento Inventory's reservation, for the compensation
  * tests on a Magento without Inventory. Loaded by the bootstrap only

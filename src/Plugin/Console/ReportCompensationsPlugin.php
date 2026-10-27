@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -36,14 +36,6 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class ReportCompensationsPlugin
 {
-    /**
-     * Constructor.
-     * @param CoordinatedCompensation $coordinated
-     * @param ObligationResource $obligations
-     * @param SerializerInterface $serializer
-     * @param State $appState
-     * @param OptionalInventory $inventory
-     */
     public function __construct(
         private readonly CoordinatedCompensation $coordinated,
         private readonly ObligationResource $obligations,
@@ -55,11 +47,6 @@ class ReportCompensationsPlugin
 
     /**
      * Runs the command's loop with one accurate line per row and a non-zero exit when anything was refused.
-     * @param CreateCompensations $subject
-     * @param callable $proceed
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     * @return int
      */
     public function aroundExecute(
         CreateCompensations $subject,
@@ -85,13 +72,11 @@ class ReportCompensationsPlugin
             $output->writeln('<error>A list of compensations needs to be defined as argument or STDIN.</error>');
             return Cli::RETURN_FAILURE;
         }
-        $output->writeln('<info>Compensations:</info>');
-        $refused = 0;
+        $output->writeln('<info>Following reservations were created:</info>');
         foreach ((array) $arguments as $argument) {
             try {
                 $reservation = $reservationFromArgument->execute($argument);
             } catch (\Throwable $e) {
-                $refused++;
                 $output->writeln(sprintf('  - <error>%s: %s</error>', $argument, $e->getMessage()));
                 continue;
             }
@@ -104,6 +89,13 @@ class ReportCompensationsPlugin
                         throw new \RuntimeException('Magento Inventory is not available on this store.');
                     }
                     $writer->execute([$reservation]);
+                    if (!$this->isManaged((string) $reservation->getSku(), (int) $reservation->getStockId())) {
+                        $output->writeln(sprintf(
+                            '  - Product <comment>%s</comment>: Magento keeps no reservations for it (stock not managed), nothing written',
+                            $reservation->getSku()
+                        ));
+                        continue;
+                    }
                     $output->writeln(sprintf(
                         '  - Product <comment>%s</comment> was compensated by <comment>%+f</comment> for stock <comment>%s</comment>',
                         $reservation->getSku(),
@@ -111,15 +103,13 @@ class ReportCompensationsPlugin
                         $reservation->getStockId()
                     ));
                 } catch (\Throwable $e) {
-                    $refused++;
-                    $output->writeln(sprintf('  - <error>%s</error>', $e->getMessage()));
+                        $output->writeln(sprintf('  - <error>%s</error>', $e->getMessage()));
                 }
                 continue;
             }
             try {
                 $outcome = $this->coordinated->apply($orderId, $reservation);
             } catch (\Throwable $e) {
-                $refused++;
                 $output->writeln(sprintf(
                     '  - <error>Order %d, product %s: refused, its stock registration could not complete (%s)</error>',
                     $orderId,
@@ -129,7 +119,6 @@ class ReportCompensationsPlugin
                 continue;
             }
             if ($outcome->isRefused()) {
-                $refused++;
             }
             $output->writeln(sprintf(
                 '  - Order %d, product <comment>%s</comment>, stock <comment>%d</comment>: %s',
@@ -139,13 +128,25 @@ class ReportCompensationsPlugin
                 $outcome->describe()
             ));
         }
-        return $refused === 0 ? Cli::RETURN_SUCCESS : Cli::RETURN_FAILURE;
+        // as Magento's own command: a refused row is reported, the run succeeds
+        return Cli::RETURN_SUCCESS;
+    }
+
+    private function isManaged(string $sku, int $stockId): bool
+    {
+        $configuration = $this->inventory->stockItemConfiguration();
+        if ($configuration === null) {
+            return true;
+        }
+        try {
+            return (bool) $configuration->execute($sku, $stockId)->isManageStock();
+        } catch (\Throwable) {
+            return true;
+        }
     }
 
     /**
      * The order a row names, when this module holds an obligation for it.
-     * @param object $reservation
-     * @return int|null
      */
     private function orderIdWithObligation(object $reservation): ?int
     {

@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -18,17 +18,6 @@ class Outcome
     public const ALREADY_BALANCED = 'already_balanced';
     public const REFUSED = 'refused';
 
-    /**
-     * Constructor.
-     * @param string $kind
-     * @param string $sku
-     * @param int $stockId
-     * @param float $requested
-     * @param float $remainingBefore
-     * @param float $remainingAfter
-     * @param bool $registrationRan
-     * @param string $reason
-     */
     public function __construct(
         public readonly string $kind,
         public readonly string $sku,
@@ -44,7 +33,6 @@ class Outcome
     /**
      * Whether the compensation was refused (nothing written).
      *
-     * @return bool
      */
     public function isRefused(): bool
     {
@@ -54,7 +42,6 @@ class Outcome
     /**
      * One line for the command's output: what happened and what remains.
      *
-     * @return string
      */
     public function describe(): string
     {

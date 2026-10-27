@@ -1,7 +1,7 @@
 <?php
 /**
- * Copyright © Hyvä Themes B.V. All rights reserved.
- * See LICENSE.md for the terms.
+ * Copyright © Hyvä Themes. All rights reserved.
+ * See COPYING.txt for license details.
  */
 
 declare(strict_types=1);
@@ -13,6 +13,7 @@ use Hyva\InventoryOrderReservation\Model\OptionalInventory;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Sales\Model\Order;
 use Magento\Sales\Model\Order\Item;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 class RemainingInconsistencyTest extends TestCase
@@ -23,7 +24,7 @@ class RemainingInconsistencyTest extends TestCase
         self::assertSame(0.0, $this->service()->expectedSum($order, 'mug'));
     }
 
-    public function test_an_open_order_expects_minus_what_is_neither_cancelled_refunded_nor_shipped(): void
+    public function test_an_open_order_expects_minus_what_is_neither_canceled_refunded_nor_shipped(): void
     {
         $order = $this->order(Order::STATE_PROCESSING, [
             $this->item('mug', 'simple', 5, 1, 1, 1, 0, false),
@@ -53,6 +54,62 @@ class RemainingInconsistencyTest extends TestCase
             $this->item('shirt', 'simple', 1, 0, 0, 0, 0, false),
         ]);
         self::assertSame(-1.0, $this->service($managed)->expectedSum($order, 'shirt'));
+    }
+
+    #[Test]
+    public function a_configurable_child_follows_its_parents_shipped_quantity(): void
+    {
+        // two ordered, one shipped through the parent: the child's own qty_shipped stays 0 in Magento
+        $parent = $this->item('shirt-blue', 'configurable', 2.0, 0.0, 0.0, 1.0, 2.0, false);
+        $child = $this->item('shirt-blue', 'simple', 2.0, 0.0, 0.0, 0.0, 0.0, false);
+        $parent->setItemId(100);
+        $child->setParentItemId(100);
+        $child->setParentItem($parent);
+        $service = $this->service($this->managing(['simple']));
+
+        self::assertSame(-1.0, $service->expectedSum($this->order(Order::STATE_PROCESSING, [$parent, $child]), 'shirt-blue'));
+    }
+
+    #[Test]
+    public function a_child_of_a_bundle_that_ships_separately_keeps_its_own_progress(): void
+    {
+        $parent = $this->item('bundle', 'bundle', 1.0, 0.0, 0.0, 1.0, 1.0, false);
+        $parent->setItemId(200);
+        $parent->setProductOptions(['shipment_type' => \Magento\Catalog\Model\Product\Type\AbstractType::SHIPMENT_SEPARATELY]);
+        $child = $this->item('bundle-part', 'simple', 3.0, 0.0, 0.0, 1.0, 3.0, false);
+        $child->setParentItemId(200);
+        $child->setParentItem($parent);
+        $service = $this->service($this->managing(['simple']));
+
+        self::assertSame(-2.0, $service->expectedSum($this->order(Order::STATE_PROCESSING, [$parent, $child]), 'bundle-part'));
+    }
+
+    #[Test]
+    public function a_canceled_and_refunded_parent_projects_both_onto_its_child(): void
+    {
+        $parent = $this->item('shirt-red', 'configurable', 4.0, 1.0, 1.0, 2.0, 3.0, false);
+        $parent->setItemId(300);
+        $child = $this->item('shirt-red', 'simple', 4.0, 0.0, 0.0, 0.0, 0.0, false);
+        $child->setParentItemId(300);
+        $child->setParentItem($parent);
+        $service = $this->service($this->managing(['simple']));
+
+        // 4 ordered, 1 canceled, 1 refunded, 2 shipped on the parent: nothing is left to reserve
+        self::assertSame(-0.0, $service->expectedSum($this->order(Order::STATE_PROCESSING, [$parent, $child]), 'shirt-red'));
+    }
+
+    private function managing(array $types): object
+    {
+        return new class($types) {
+            public function __construct(private readonly array $types)
+            {
+            }
+
+            public function execute(string $type): bool
+            {
+                return in_array($type, $this->types, true);
+            }
+        };
     }
 
     private function service(?object $managed = null): RemainingInconsistency

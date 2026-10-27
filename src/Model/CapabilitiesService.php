@@ -20,7 +20,7 @@ class CapabilitiesService implements CapabilitiesInterface
      * The release this source is at; the composer package's version for
      * a client that compares.
      */
-    public const VERSION = '1.0.0';
+    public const VERSION = '0.1.0';
 
     public function __construct(
         private readonly CapabilitiesFactory $capabilitiesFactory,

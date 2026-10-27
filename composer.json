@@ -43,6 +43,5 @@
         "psr-4": {
             "Hyva\\InventoryOrderReservation\\Test\\Unit\\": "tests/unit/"
         }
-    },
-    "version": "1.0.0"
+    }
 }

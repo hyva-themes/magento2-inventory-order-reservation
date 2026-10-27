@@ -31,7 +31,7 @@ An extension attribute no module declares is refused by Magento's input validati
 
 ```http
 GET /rest/V1/inventory/order-reservation
-{"version": "1.0.0", "mode": "inventory", "attribute": "reserve_stock", "ready": true, "problem": null}
+{"version": "0.1.0", "mode": "inventory", "attribute": "reserve_stock", "ready": true, "problem": null}
 ```
 
 - `mode` is `inventory` when `Magento_InventorySales` is enabled, `legacy` otherwise.
@@ -93,7 +93,7 @@ This package itself has no dependency on MSI, and none on any other Hyvä packag
 
 ### Updating with Hyvä POS
 
-Hyvä POS (`Hyva_Pos`) plugs into the companion's handler to assign the register's sources before a placement. Update the POS module and these packages together: an older `Hyva_Pos` with these 1.0 packages leaves that step unplugged, because the handler it targets moved to the companion; and these packages with the new `Hyva_Pos` but without the companion leave an MSI store's orders owed until the companion is installed, which the admin message tells you.
+Hyvä POS (`Hyva_Pos`) plugs into the companion's handler to assign the register's sources before a placement. Update the POS module and these packages together: an older `Hyva_Pos` with these 0.1 packages leaves that step unplugged, because the handler it targets moved to the companion; and these packages with the new `Hyva_Pos` but without the companion leave an MSI store's orders owed until the companion is installed, which the admin message tells you.
 
 ## Without Magento Inventory
 

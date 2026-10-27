@@ -29,11 +29,7 @@
         "magento/module-catalog": "*"
     },
     "suggest": {
-        "magento/module-inventory-sales": "With Magento Inventory the module places the order's reservation; without it, it deducts the legacy stock item.",
-        "magento/module-inventory-reservations-api": "The reservation writer the coordinated compensation goes through.",
-        "magento/module-inventory-reservation-cli": "Magento's inconsistency listing and compensation command, which the module coordinates.",
-        "magento/module-inventory-catalog-api": "The catalog types Magento's placement filters by.",
-        "magento/module-inventory-configuration-api": "The manage-stock reading Magento's listing filters by."
+        "hyva-themes/magento2-inventory-order-reservation-msi": "On a store with Magento Inventory: the handler that places the reservation and the coordination of Magento's repair tools. Required there; a store without Inventory takes the legacy path with this package alone."
     },
     "autoload": {
         "files": [

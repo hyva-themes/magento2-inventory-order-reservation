@@ -30,6 +30,7 @@ class Obligation
 
     public const SETTLED_BY_REGISTRATION = 'registration';
     public const SETTLED_BY_COMPENSATION = 'compensation';
+    public const SETTLED_BY_BALANCED = 'balanced';
 
     public function __construct(
         public readonly int $orderId,

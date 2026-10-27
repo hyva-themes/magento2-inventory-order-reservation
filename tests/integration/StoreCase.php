@@ -11,7 +11,7 @@ namespace Hyva\InventoryOrderReservation\Test\Integration;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Obligation;
-use Hyva\InventoryOrderReservation\Model\OptionalInventory;
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
@@ -80,7 +80,7 @@ abstract class StoreCase extends TestCase
 
     protected function inventoryInstalled(): bool
     {
-        return self::$objectManager->get(OptionalInventory::class)->isInstalled();
+        return self::$objectManager->get(InventoryPresence::class)->isInventory();
     }
 
     protected function requireInventory(): void
@@ -419,6 +419,56 @@ abstract class StoreCase extends TestCase
         self::$objectManager->get(ObligationResource::class)->markRefused($orderId);
     }
 
+    /**
+     * One row refused for a reason a placement cannot fix, as the registration refuses it.
+     */
+    protected function refuseRow(int $orderId, string $sku, string $reason): void
+    {
+        self::$objectManager->get(ObligationResource::class)->markRowRefused($orderId, $sku, $reason);
+    }
+
+    /** Fails updates of the obligation table while it exists. */
+    private const FAILING_TRIGGER = 'hyva_test_settlement_fails';
+
+    /**
+     * From here on the obligation table refuses updates inside the
+     * database: every one with no sku given (a signaled error, the way a
+     * lost connection or a deadlock would fail a settlement), or the
+     * completion of the given sku only (its order id set to one no order
+     * has, which the foreign key refuses whatever the SQL mode), so a run
+     * that settles several rows fails on that one after the others went through.
+     */
+    protected function failSettlements(?string $sku = null): void
+    {
+        $this->letSettlementsPass();
+        $table = $this->table(ObligationResource::TABLE);
+        $this->connection()->query($sku === null
+            ? sprintf(
+                "CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'simulated failure after the compensation write'",
+                self::FAILING_TRIGGER,
+                $table
+            )
+            : sprintf(
+                "CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW SET NEW.order_id = IF(NEW.sku = %s AND NEW.status = 'done', -1, NEW.order_id)",
+                self::FAILING_TRIGGER,
+                $table,
+                $this->connection()->quote($sku)
+            ));
+    }
+
+    /**
+     * The trigger gone; a transaction a failure left open is rolled back
+     * first, since the store refuses DDL inside one.
+     */
+    protected function letSettlementsPass(): void
+    {
+        $connection = $this->connection();
+        while ($connection->getTransactionLevel() > 0) {
+            $connection->rollBack();
+        }
+        $connection->query(sprintf('DROP TRIGGER IF EXISTS %s', self::FAILING_TRIGGER));
+    }
+
     /** @return int[] */
     protected function orderIdsRefused(): array
     {
@@ -571,6 +621,59 @@ abstract class StoreCase extends TestCase
     protected function dropPlacements(string $sku = self::SKU): void
     {
         $this->connection()->delete($this->table('inventory_reservation'), ['sku = ?' => $sku]);
+    }
+
+    /**
+     * A second process holding the order's lock while registering it, for the given seconds: a real lock holder.
+     *
+     * @return array{0: resource, 1: array<int, resource>, 2: string}
+     */
+    protected function holdLockWhileRegistering(int $orderId, int $seconds): array
+    {
+        $root = self::magentoRoot();
+        $marker = sys_get_temp_dir() . '/ior-lock-' . $orderId . '-' . uniqid();
+        $command = sprintf(
+            '%s %s %s %d %d %s register',
+            escapeshellarg(PHP_BINARY),
+            escapeshellarg(__DIR__ . '/bin/hold-order-lock.php'),
+            escapeshellarg($root),
+            $orderId,
+            $seconds,
+            escapeshellarg($marker)
+        );
+        $pipes = [];
+        // a second PHP process is the point of this test: a real lock holder
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        $deadline = microtime(true) + 60;
+        while (!file_exists($marker)) {
+            if (microtime(true) > $deadline) {
+                self::fail('the lock holder never took the lock: ' . stream_get_contents($pipes[2]));
+            }
+            usleep(100000);
+        }
+        return [$process, $pipes, $marker];
+    }
+
+    /**
+     * @param array{0: resource, 1: array<int, resource>, 2: string} $child
+     */
+    protected function finish(array $child): void
+    {
+        [$process, $pipes, $marker] = $child;
+        $out = stream_get_contents($pipes[1]);
+        $err = stream_get_contents($pipes[2]);
+        foreach ($pipes as $pipe) {
+            fclose($pipe);
+        }
+        // phpcs:ignore Magento2.Security.InsecureFunction.Found
+        $exit = proc_close($process);
+        if (is_file($marker)) {
+            unlink($marker);
+        }
+        self::assertSame(0, $exit, 'the lock holder ended cleanly: ' . $err);
+        self::assertStringContainsString('released', $out);
     }
 
     protected function productId(string $sku): int

@@ -38,10 +38,27 @@ class LegacyHandler implements HandlerInterface
     }
 
     /**
-     * Registers the sale on the legacy stock items for the owed skus and refreshes the stock index.
+     * Registers the sale on the legacy stock items for the owed skus and refreshes the stock index; every row with a quantity is placed, a row without is balanced.
      * @throws LocalizedException when a sku is not in the catalog
      */
-    public function register(OrderInterface $order, array $owed): void
+    public function register(OrderInterface $order, array $owed): array
+    {
+        $this->deduct($order, $owed);
+        return array_map(
+            static fn (Obligation $row): RowOutcome => $row->qtyOrdered > 0
+                ? new RowOutcome($row, RowOutcome::PLACED, $row->qtyOrdered)
+                : new RowOutcome($row, RowOutcome::BALANCED),
+            $owed
+        );
+    }
+
+    /**
+     * The deduction itself, for the rows with a quantity.
+     *
+     * @param Obligation[] $owed
+     * @throws LocalizedException when a sku is not in the catalog
+     */
+    private function deduct(OrderInterface $order, array $owed): void
     {
         $qtyByProduct = [];
         $skuByProduct = [];
@@ -116,5 +133,4 @@ class LegacyHandler implements HandlerInterface
             $this->stockRegistry->updateStockItemBySku($skuByProduct[$productId], $stockItem);
         }
     }
-
 }

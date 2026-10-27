@@ -11,7 +11,8 @@ namespace Hyva\InventoryOrderReservation\Model;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
-use Hyva\InventoryOrderReservation\Model\Handler\RepairNeededException;
+use Hyva\InventoryOrderReservation\Model\Handler\InstallationProblemException;
+use Hyva\InventoryOrderReservation\Model\Handler\RowOutcome;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Api\OrderRepositoryInterface;
@@ -33,14 +34,15 @@ use Psr\Log\LoggerInterface;
 class StockRegistration implements StockRegistrationInterface
 {
     /**
-     * @param HandlerInterface[] $handlers keyed by Obligation::MODE_*
+     * @param \ArrayAccess<string, HandlerInterface> $handlers keyed by Obligation::MODE_*, each built on first use
      */
     public function __construct(
         private readonly OrderMutexInterface $orderMutex,
         private readonly ObligationResource $obligations,
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly LoggerInterface $logger,
-        private readonly array $handlers = []
+        private readonly \ArrayAccess $handlers,
+        private readonly Readiness $readiness
     ) {
     }
 
@@ -53,17 +55,16 @@ class StockRegistration implements StockRegistrationInterface
     {
         try {
             return (bool) $this->orderMutex->execute($orderId, $this->registerLocked(...), [$orderId]);
+        } catch (InstallationProblemException $e) {
+            // not the order's failure: no attempt counted, no per-order log
+            // line; the admin message and the listing name the installation
+            throw $e;
         } catch (\Throwable $e) {
             // outside the rolled-back transaction: the attempt and its
             // reason, for the admin message and the console listing
             $attempts = $this->obligations->recordFailure($orderId, $e->getMessage());
             $context = ['order_id' => $orderId, 'attempts' => $attempts, 'exception' => $e->getMessage()];
-            if ($e instanceof RepairNeededException) {
-                // nothing to place: given up at once, so the listing names
-                // the order now and a compensation can repair it
-                $this->obligations->markRefused($orderId);
-                $this->logger->warning('Stock registration gave an order up: its rows need a compensation', $context);
-            } elseif ($attempts >= Obligation::MAX_ATTEMPTS) {
+            if ($attempts >= Obligation::MAX_ATTEMPTS) {
                 // given up: Magento's inconsistency listing shows the order
                 // again and a compensation settles it; `run <id>` tries once more
                 $this->obligations->markRefused($orderId);
@@ -95,14 +96,54 @@ class StockRegistration implements StockRegistrationInterface
                 'Stock registration needs the sales tables and the inventory tables on one database connection; this store keeps them apart.'
             ));
         }
+        $problem = $this->readiness->problem();
+        if ($problem !== null) {
+            throw new InstallationProblemException(__('%1', $problem));
+        }
         $mode = $owed[0]->mode;
         $handler = $this->handlers[$mode] ?? null;
         if (!$handler instanceof HandlerInterface) {
             throw new LocalizedException(__('No stock registration handler for mode "%1".', $mode));
         }
         $order = $this->orderRepository->get($orderId);
-        $handler->register($order, $owed);
-        $this->obligations->markDone($orderId, Obligation::SETTLED_BY_REGISTRATION);
+        $outcomes = $this->outcomesPerRow($handler->register($order, $owed), $owed);
+        // each row's state with the rows the handler wrote, in the one
+        // transaction: a refusal is a result (nothing a placement can fix,
+        // a compensation repairs it), not a failure, so no attempt is counted
+        foreach ($outcomes as $outcome) {
+            if ($outcome->isRefused()) {
+                $this->obligations->markRowRefused($orderId, $outcome->row->sku, $outcome->reason);
+            } else {
+                $this->obligations->markRowDone($orderId, $outcome->row->sku, $outcome->settledBy());
+            }
+        }
         return true;
+    }
+
+    /**
+     * The handler's answers keyed by sku, one for every owed row and none for a row it was not given.
+     *
+     * @param RowOutcome[] $outcomes
+     * @param Obligation[] $owed
+     * @return array<string, RowOutcome>
+     * @throws LocalizedException when a row has no answer or an answer names no owed row
+     */
+    private function outcomesPerRow(array $outcomes, array $owed): array
+    {
+        $bySku = [];
+        foreach ($outcomes as $outcome) {
+            $bySku[$outcome->row->sku] = $outcome;
+        }
+        $owedSkus = array_map(static fn (Obligation $row): string => $row->sku, $owed);
+        $missing = array_diff($owedSkus, array_keys($bySku));
+        $extra = array_diff(array_keys($bySku), $owedSkus);
+        if ($missing !== [] || $extra !== []) {
+            throw new LocalizedException(__(
+                'The stock registration handler answered for the wrong rows (missing: %1; unexpected: %2).',
+                implode(', ', $missing) ?: 'none',
+                implode(', ', $extra) ?: 'none'
+            ));
+        }
+        return $bySku;
     }
 }

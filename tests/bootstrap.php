@@ -33,8 +33,3 @@ if ($autoload === null) {
 $loader = require $autoload;
 $loader->addPsr4('Hyva\\InventoryOrderReservation\\', $moduleRoot . '/src/', true);
 $loader->addPsr4('Hyva\\InventoryOrderReservation\\Test\\Unit\\', $moduleRoot . '/tests/unit/', true);
-
-if (!interface_exists(\Magento\InventoryReservationsApi\Model\ReservationInterface::class)) {
-    // a Magento without Inventory: the shape the compensation tests mock
-    require_once __DIR__ . '/stubs/ReservationInterface.php';
-}

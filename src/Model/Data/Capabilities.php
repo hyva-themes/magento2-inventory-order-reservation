@@ -16,7 +16,9 @@ class Capabilities implements CapabilitiesInterface
     public function __construct(
         private readonly string $version,
         private readonly string $mode,
-        private readonly string $attribute = 'reserve_stock'
+        private readonly string $attribute = 'reserve_stock',
+        private readonly bool $ready = true,
+        private readonly ?string $problem = null
     ) {
     }
 
@@ -45,5 +47,15 @@ class Capabilities implements CapabilitiesInterface
     public function getAttribute(): string
     {
         return $this->attribute;
+    }
+
+    public function isReady(): bool
+    {
+        return $this->ready;
+    }
+
+    public function getProblem(): ?string
+    {
+        return $this->problem;
     }
 }

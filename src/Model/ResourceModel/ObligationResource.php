@@ -153,19 +153,25 @@ class ObligationResource
     }
 
     /**
-     * Marks every owed row of the order done, in the caller's transaction.
-     */
-    public function markDone(int $orderId, string $settledBy): void
-    {
-        $this->settle(['order_id = ?' => $orderId], $settledBy);
-    }
-
-    /**
      * One sku of the order settled, the others untouched.
      */
     public function markRowDone(int $orderId, string $sku, string $settledBy): void
     {
         $this->settle(['order_id = ?' => $orderId, 'sku = ?' => $sku], $settledBy);
+    }
+
+    /**
+     * One sku of the order refused for a reason a placement cannot fix, in
+     * the caller's transaction: a compensation repairs it, and `run <id>`
+     * tries it again. No attempt is counted; the reason is the last error.
+     */
+    public function markRowRefused(int $orderId, string $sku, string $reason): void
+    {
+        $this->connection()->update(
+            $this->table(),
+            ['status' => Obligation::STATUS_REFUSED, 'last_error' => mb_substr($reason, 0, 2000)],
+            ['order_id = ?' => $orderId, 'sku = ?' => $sku, 'status = ?' => Obligation::STATUS_OWED]
+        );
     }
 
     /**

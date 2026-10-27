@@ -22,7 +22,8 @@ class OwedMessage implements MessageInterface
     public const OWED_FOR_SECONDS = 3600;
 
     public function __construct(
-        private readonly ObligationResource $obligations
+        private readonly ObligationResource $obligations,
+        private readonly Readiness $readiness
     ) {
     }
 
@@ -45,6 +46,10 @@ class OwedMessage implements MessageInterface
         if ($summary['refused'] > 0) {
             return true;
         }
+        if ($summary['count'] > 0 && $this->readiness->problem() !== null) {
+            // an installation problem is named at once, not after an hour
+            return true;
+        }
         if ($summary['count'] === 0 || $summary['oldest'] === null) {
             return false;
         }
@@ -58,9 +63,17 @@ class OwedMessage implements MessageInterface
     public function getText(): string
     {
         $summary = $this->obligations->owedSummary();
+        $problem = $this->readiness->problem();
+        if ($problem !== null && $summary['count'] > 0) {
+            return (string) __(
+                'Stock registration cannot run: %1 %2 order(s) created through the API wait for it, and the first registration after the fix completes them.',
+                $problem,
+                $summary['count']
+            );
+        }
         if ($summary['refused'] > 0) {
             return (string) __(
-                'The stock registration of %1 order(s) created through the API was given up after repeated failures, and %2 still owe it. '
+                'The stock registration of %1 order(s) created through the API was refused, after repeated failures or for a discrepancy only a compensation repairs, and %2 still owe it. '
                 . 'Read bin/magento inventory:order-reservation:list for the reasons; inventory:order-reservation:run <order id> tries one again, '
                 . 'and a compensation through inventory:reservation:create-compensations settles it.',
                 $summary['refused'],

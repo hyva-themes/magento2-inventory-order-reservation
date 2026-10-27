@@ -26,6 +26,11 @@
             <argument name="handlers" xsi:type="object">Hyva\InventoryOrderReservation\Model\Handler\Pool</argument>
         </arguments>
     </type>
+    <type name="Hyva\InventoryOrderReservation\Model\Readiness">
+        <arguments>
+            <argument name="handlers" xsi:type="object">Hyva\InventoryOrderReservation\Model\Handler\Pool</argument>
+        </arguments>
+    </type>
     <type name="Magento\Framework\Console\CommandList">
         <arguments>
             <argument name="commands" xsi:type="array">

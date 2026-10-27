@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
 use Hyva\InventoryOrderReservation\Model\Obligation;
+use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Console\Cli;
 use Symfony\Component\Console\Command\Command;
@@ -23,7 +24,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 class ListOwedCommand extends Command
 {
     public function __construct(
-        private readonly ObligationResource $obligations
+        private readonly ObligationResource $obligations,
+        private readonly Readiness $readiness
     ) {
         parent::__construct();
     }
@@ -39,6 +41,10 @@ class ListOwedCommand extends Command
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $problem = $this->readiness->problem();
+        if ($problem !== null) {
+            $output->writeln('<comment>Stock registration cannot run: ' . OutputFormatter::escape($problem) . '</comment>');
+        }
         $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
         $refusedIds = $this->obligations->orderIdsRefused();
         if ($owedIds === [] && $refusedIds === []) {

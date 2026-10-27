@@ -11,6 +11,7 @@ namespace Hyva\InventoryOrderReservation\Model;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Handler\InstallationProblemException;
 use Hyva\InventoryOrderReservation\Model\Handler\RowOutcome;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Exception\LocalizedException;
@@ -40,7 +41,8 @@ class StockRegistration implements StockRegistrationInterface
         private readonly ObligationResource $obligations,
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly LoggerInterface $logger,
-        private readonly \ArrayAccess $handlers
+        private readonly \ArrayAccess $handlers,
+        private readonly Readiness $readiness
     ) {
     }
 
@@ -53,6 +55,10 @@ class StockRegistration implements StockRegistrationInterface
     {
         try {
             return (bool) $this->orderMutex->execute($orderId, $this->registerLocked(...), [$orderId]);
+        } catch (InstallationProblemException $e) {
+            // not the order's failure: no attempt counted, no per-order log
+            // line; the admin message and the listing name the installation
+            throw $e;
         } catch (\Throwable $e) {
             // outside the rolled-back transaction: the attempt and its
             // reason, for the admin message and the console listing
@@ -89,6 +95,10 @@ class StockRegistration implements StockRegistrationInterface
             throw new LocalizedException(__(
                 'Stock registration needs the sales tables and the inventory tables on one database connection; this store keeps them apart.'
             ));
+        }
+        $problem = $this->readiness->problem();
+        if ($problem !== null) {
+            throw new InstallationProblemException(__('%1', $problem));
         }
         $mode = $owed[0]->mode;
         $handler = $this->handlers[$mode] ?? null;

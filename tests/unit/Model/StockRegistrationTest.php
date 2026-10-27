@@ -10,8 +10,10 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
 
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
+use Hyva\InventoryOrderReservation\Model\Handler\InstallationProblemException;
 use Hyva\InventoryOrderReservation\Model\Handler\RowOutcome;
 use Hyva\InventoryOrderReservation\Model\Obligation;
+use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Hyva\InventoryOrderReservation\Model\StockRegistration;
 use Magento\Framework\Exception\LocalizedException;
@@ -153,6 +155,21 @@ class StockRegistrationTest extends TestCase
         $this->registration($resource, $handler)->register(9);
     }
 
+    public function test_an_installation_problem_leaves_the_order_owed_with_no_attempt_counted(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->resource([$owed]);
+        $resource->expects(self::never())->method('recordFailure');
+        $resource->expects(self::never())->method('markRefused');
+        $resource->expects(self::never())->method('markRowDone');
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        $this->expectException(InstallationProblemException::class);
+        $this->expectExceptionMessage('Hyva_InventoryOrderReservationMsi, which places the reservation, is not installed');
+        $this->registration($resource, $handler, problem: 'Magento Inventory is enabled, but Hyva_InventoryOrderReservationMsi, which places the reservation, is not installed.')->register(9);
+    }
+
     public function test_a_mode_without_a_handler_is_a_failure_not_a_legacy_deduction(): void
     {
         $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, 'held');
@@ -212,8 +229,10 @@ class StockRegistrationTest extends TestCase
         };
     }
 
-    private function registration(ObligationResource $resource, HandlerInterface $handler): StockRegistration
+    private function registration(ObligationResource $resource, HandlerInterface $handler, ?string $problem = null): StockRegistration
     {
+        $readiness = $this->createMock(Readiness::class);
+        $readiness->method('problem')->willReturn($problem);
         $mutex = $this->createMock(OrderMutexInterface::class);
         $mutex->method('execute')->willReturnCallback(static fn (int $orderId, callable $callable, array $args) => $callable(...$args));
         $orders = $this->createMock(OrderRepositoryInterface::class);
@@ -223,7 +242,8 @@ class StockRegistrationTest extends TestCase
             $resource,
             $orders,
             $this->createMock(LoggerInterface::class),
-            $this->handlers([Obligation::MODE_INVENTORY => $handler])
+            $this->handlers([Obligation::MODE_INVENTORY => $handler]),
+            $readiness
         );
     }
 }

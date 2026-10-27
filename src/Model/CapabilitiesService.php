@@ -12,6 +12,7 @@ namespace Hyva\InventoryOrderReservation\Model;
 use Hyva\InventoryOrderReservation\Api\CapabilitiesInterface;
 use Hyva\InventoryOrderReservation\Api\Data\CapabilitiesInterface as Capabilities;
 use Hyva\InventoryOrderReservation\Model\Data\CapabilitiesFactory;
+use Magento\Store\Model\StoreManagerInterface;
 
 class CapabilitiesService implements CapabilitiesInterface
 {
@@ -23,19 +24,23 @@ class CapabilitiesService implements CapabilitiesInterface
 
     public function __construct(
         private readonly CapabilitiesFactory $capabilitiesFactory,
-        private readonly InventoryPresence $inventory
+        private readonly InventoryPresence $inventory,
+        private readonly Readiness $readiness,
+        private readonly StoreManagerInterface $storeManager
     ) {
     }
 
     /**
-     * The module's version, the store's mode and the attribute to send.
-     *
+     * The module's version, the store's mode, the attribute to send, and whether registration runs for the request's website.
      */
     public function get(): Capabilities
     {
+        $problem = $this->readiness->problem((int) $this->storeManager->getStore()->getWebsiteId());
         return $this->capabilitiesFactory->create([
             'version' => self::VERSION,
             'mode' => $this->inventory->mode(),
+            'ready' => $problem === null,
+            'problem' => $problem,
         ]);
     }
 }

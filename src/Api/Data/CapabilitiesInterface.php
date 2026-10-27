@@ -18,6 +18,8 @@ interface CapabilitiesInterface
     public const VERSION = 'version';
     public const MODE = 'mode';
     public const ATTRIBUTE = 'attribute';
+    public const READY = 'ready';
+    public const PROBLEM = 'problem';
 
     /**
      * The module's version, as its composer package declares it.
@@ -36,4 +38,16 @@ interface CapabilitiesInterface
      * @return string
      */
     public function getAttribute(): string;
+
+    /**
+     * Whether registration runs on this store as installed: the mode's handler is installed, Inventory's modules are enabled, the website sells from a stock.
+     * @return bool
+     */
+    public function isReady(): bool;
+
+    /**
+     * Why it does not, or null.
+     * @return string|null
+     */
+    public function getProblem(): ?string;
 }

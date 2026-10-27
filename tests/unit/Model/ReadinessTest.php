@@ -43,9 +43,9 @@ class ReadinessTest extends TestCase
 
     public function test_an_incomplete_inventory_installation_names_the_missing_modules_and_stays_an_inventory_store(): void
     {
-        $readiness = $this->readiness(inventory: true, missing: ['Magento_InventoryReservationsApi'], handlers: ['inventory'], stockId: 2);
+        $readiness = $this->readiness(inventory: true, missing: ['Magento_InventoryReservations'], handlers: ['inventory'], stockId: 2);
         self::assertSame(
-            'Magento Inventory is enabled, but these of its modules are disabled or missing: Magento_InventoryReservationsApi.',
+            'Magento Inventory is enabled, but these of its modules are disabled or missing: Magento_InventoryReservations.',
             $readiness->problem()
         );
     }

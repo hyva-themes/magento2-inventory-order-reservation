@@ -25,12 +25,21 @@ class InventoryPresence
     /** The module whose presence decides the mode. */
     public const MODE_MODULE = 'Magento_InventorySales';
 
-    /** The Inventory modules the handler package reads; a missing one is an installation problem, not a mode. */
+    /**
+     * The Inventory modules the handler package reads, the implementations
+     * and their API modules; a missing one is an installation problem, not
+     * a mode. The reservation builder and writer are Magento_InventoryReservations',
+     * the product-type lookup Magento_InventoryCatalog's, the source-item rule
+     * and the stock-item configuration Magento_InventoryConfiguration's.
+     */
     private const REQUIRED_MODULES = [
         'Magento_InventorySales',
         'Magento_InventorySalesApi',
+        'Magento_InventoryReservations',
         'Magento_InventoryReservationsApi',
+        'Magento_InventoryCatalog',
         'Magento_InventoryCatalogApi',
+        'Magento_InventoryConfiguration',
         'Magento_InventoryConfigurationApi',
     ];
 

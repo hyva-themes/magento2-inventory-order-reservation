@@ -9,8 +9,6 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Model;
 
-use Composer\InstalledVersions;
-
 /**
  * This package's version as Composer installed it: the tag the store's
  * composer.lock resolved ("1.0.2"), or the branch of a development install
@@ -23,11 +21,13 @@ class PackageVersion
     public const PACKAGE = 'hyva-themes/magento2-inventory-order-reservation';
     public const UNKNOWN = 'unknown';
 
+    public function __construct(
+        private readonly InstalledPackages $installedPackages
+    ) {
+    }
+
     public function get(): string
     {
-        if (!InstalledVersions::isInstalled(self::PACKAGE)) {
-            return self::UNKNOWN;
-        }
-        return InstalledVersions::getPrettyVersion(self::PACKAGE) ?? self::UNKNOWN;
+        return $this->installedPackages->prettyVersion(self::PACKAGE) ?? self::UNKNOWN;
     }
 }

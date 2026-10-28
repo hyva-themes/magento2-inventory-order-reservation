@@ -9,76 +9,48 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
 
-use Composer\InstalledVersions;
+use Hyva\InventoryOrderReservation\Model\InstalledPackages;
 use Hyva\InventoryOrderReservation\Model\PackageVersion;
 use PHPUnit\Framework\TestCase;
 
 // phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
 
 /**
- * The version is what Composer installed, read from its runtime data.
+ * The version is what Composer installed this package at, or "unknown".
+ * Composer's record is stubbed: the borrowed vendor directory may hold
+ * the package itself, and its own data would decide the result.
  */
 class PackageVersionTest extends TestCase
 {
-    protected function tearDown(): void
-    {
-        // back to the vendor directory's own installed.php
-        InstalledVersions::reload(null);
-    }
-
     public function test_a_tagged_install_reports_its_tag(): void
     {
-        $this->installed('1.0.2', '1.0.2.0');
-
-        self::assertSame('1.0.2', (new PackageVersion())->get());
+        self::assertSame('1.0.2', $this->version('1.0.2')->get());
     }
 
     public function test_a_branch_install_reports_its_branch(): void
     {
-        $this->installed('dev-main', 'dev-main');
-
-        self::assertSame('dev-main', (new PackageVersion())->get());
+        self::assertSame('dev-main', $this->version('dev-main')->get());
     }
 
     public function test_a_module_outside_composer_reports_unknown(): void
     {
-        InstalledVersions::reload(['root' => $this->root(), 'versions' => []]);
-
-        self::assertSame(PackageVersion::UNKNOWN, (new PackageVersion())->get());
+        self::assertSame(PackageVersion::UNKNOWN, $this->version(null)->get());
     }
 
-    private function installed(string $prettyVersion, string $version): void
+    public function test_the_record_answers_for_installed_packages_and_null_for_others(): void
     {
-        InstalledVersions::reload([
-            'root' => $this->root(),
-            'versions' => [
-                PackageVersion::PACKAGE => [
-                    'pretty_version' => $prettyVersion,
-                    'version' => $version,
-                    'reference' => null,
-                    'type' => 'magento2-module',
-                    'install_path' => __DIR__,
-                    'aliases' => [],
-                    'dev_requirement' => false,
-                ],
-            ],
-        ]);
+        $installed = new InstalledPackages();
+
+        // every borrowed Magento vendor directory holds the framework
+        self::assertNotEmpty($installed->prettyVersion('magento/framework'));
+        self::assertNull($installed->prettyVersion('hyva-themes/no-such-package'));
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function root(): array
+    private function version(?string $installedAt): PackageVersion
     {
-        return [
-            'name' => 'test/root',
-            'pretty_version' => 'dev-main',
-            'version' => 'dev-main',
-            'reference' => null,
-            'type' => 'project',
-            'install_path' => __DIR__,
-            'aliases' => [],
-            'dev' => false,
-        ];
+        $packages = $this->createMock(InstalledPackages::class);
+        $packages->method('prettyVersion')->with(PackageVersion::PACKAGE)->willReturn($installedAt);
+
+        return new PackageVersion($packages);
     }
 }

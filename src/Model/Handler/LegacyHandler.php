@@ -14,7 +14,6 @@ use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
 use Magento\CatalogInventory\Api\StockConfigurationInterface;
 use Magento\CatalogInventory\Api\StockManagementInterface;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
-use Magento\CatalogInventory\Model\Spi\StockStateProviderInterface;
 use Magento\CatalogInventory\Model\StockStateException;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
 use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
@@ -38,7 +37,6 @@ class LegacyHandler implements HandlerInterface
         private readonly ProductResource $productResource,
         private readonly StockIndexerProcessor $stockIndexerProcessor,
         private readonly StockRegistryInterface $stockRegistry,
-        private readonly StockStateProviderInterface $stockStateProvider,
         private readonly StockResource $stockResource,
         private readonly StockConfigurationInterface $stockConfiguration,
         private readonly StockRegistryStorage $stockRegistryStorage
@@ -124,7 +122,10 @@ class LegacyHandler implements HandlerInterface
     /**
      * What `registerProductsSale` does without its quantity check, which
      * the admin area's stock item skips: the quantity taken off each
-     * item and its in-stock flag read again.
+     * item, saved through the stock item repository, which decides the
+     * in-stock flag as it does for a checkout's sale: an item it takes out
+     * of stock is marked as changed automatically, so a later replenishment
+     * puts it back in stock, and an item set out of stock by hand stays so.
      *
      * The quantity comes from the stock rows, read under the lock
      * `registerProductsSale` took on them in this transaction, as that
@@ -151,7 +152,6 @@ class LegacyHandler implements HandlerInterface
                 continue;
             }
             $stockItem->setQty((float) $row['qty'] - $qty);
-            $stockItem->setIsInStock($this->stockStateProvider->verifyStock($stockItem));
             $this->stockRegistry->updateStockItemBySku($skuByProduct[$productId], $stockItem);
         }
     }

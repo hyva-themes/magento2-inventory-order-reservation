@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 ### Fixed
+* Without Inventory, a line deducted past zero leaves its stock status to the stock item repository, as a checkout's sale does: the item it takes out of stock is marked as changed automatically, so a later quantity-only replenishment puts it back in stock, and an item set out of stock by hand is not switched back in. The fallback set the status itself, which skipped both rules.
 * `inventory:order-reservation:run <order id>` refuses an argument that is not an order entity id and runs none, instead of reading "42abc" as order 42 and reopening its refused rows.
 * The owed and refused lookups group by order, so "tried least first" sorts each order by its most-tried row instead of an arbitrary one; `inventory:order-reservation:list` says when it shows only the first 200 orders.
 * An order recorded in one mode and registered after the store switched to the other (Inventory enabled or disabled in between) has its rows refused with the reason, instead of being marked done by a legacy deduction Inventory turns into a no-op, or failing 24 times for a missing handler. The reason points to `inventory:order-reservation:settle`: no compensation applies to such a row.

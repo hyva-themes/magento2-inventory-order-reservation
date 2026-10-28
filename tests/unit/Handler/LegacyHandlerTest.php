@@ -19,7 +19,6 @@ use Magento\CatalogInventory\Model\StockManagement;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
 use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
-use Magento\CatalogInventory\Model\Spi\StockStateProviderInterface;
 use Magento\CatalogInventory\Model\StockRegistryStorage;
 use Magento\CatalogInventory\Model\StockStateException;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -58,7 +57,9 @@ class LegacyHandlerTest extends TestCase
         // the registry's copy is stale; the locked row holds the real quantity
         $stockItem->method('getQty')->willReturn(7.0);
         $stockItem->expects(self::once())->method('setQty')->with(-2.0);
-        $stockItem->expects(self::once())->method('setIsInStock')->with(false);
+        // the repository's save decides the stock status and its automatic-change flag
+        $stockItem->expects(self::never())->method('setIsInStock');
+        $stockItem->expects(self::never())->method('setStockStatusChangedAuto');
         $registry = $this->createMock(StockRegistryInterface::class);
         $registry->method('getStockItem')->with(100, 0)->willReturn($stockItem);
         $registry->expects(self::once())->method('updateStockItemBySku')->with('mug', $stockItem);
@@ -94,8 +95,6 @@ class LegacyHandlerTest extends TestCase
         array $locked = [],
         ?StockRegistryStorage $storage = null
     ): LegacyHandler {
-        $state = $this->createStub(StockStateProviderInterface::class);
-        $state->method('verifyStock')->willReturn(false);
         $indexer = $this->createStub(StockIndexerProcessor::class);
 
         $stockResource = $this->createStub(StockResource::class);
@@ -104,7 +103,7 @@ class LegacyHandlerTest extends TestCase
         $configuration->method('getDefaultScopeId')->willReturn(0);
         $configuration->method('isQty')->willReturnCallback(static fn (string $type): bool => $type === 'simple');
 
-        return new LegacyHandler($management, $products, $indexer, $registry, $state, $stockResource, $configuration, $storage ?? $this->createStub(StockRegistryStorage::class));
+        return new LegacyHandler($management, $products, $indexer, $registry, $stockResource, $configuration, $storage ?? $this->createStub(StockRegistryStorage::class));
     }
 
     private function order(): OrderInterface

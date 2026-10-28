@@ -50,7 +50,10 @@ class ListOwedCommand extends Command
         // one past the batch, to tell a full batch from a cut one
         $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'), ObligationResource::BATCH + 1);
         $refusedIds = $this->obligations->orderIdsRefused(ObligationResource::BATCH + 1);
-        $truncated = count($owedIds) > ObligationResource::BATCH || count($refusedIds) > ObligationResource::BATCH;
+        $cut = array_keys(array_filter([
+            'owed' => count($owedIds) > ObligationResource::BATCH,
+            'refused' => count($refusedIds) > ObligationResource::BATCH,
+        ]));
         $owedIds = array_slice($owedIds, 0, ObligationResource::BATCH);
         $refusedIds = array_slice($refusedIds, 0, ObligationResource::BATCH);
         if ($owedIds === [] && $refusedIds === []) {
@@ -92,11 +95,13 @@ class ListOwedCommand extends Command
             }
         }
 
-        if ($truncated) {
+        if ($cut !== []) {
             $output->writeln(sprintf(
-                '<comment>Only the first %d owed and the first %d refused orders are listed.</comment>',
-                ObligationResource::BATCH,
-                ObligationResource::BATCH
+                '<comment>Only the first %s orders are listed.</comment>',
+                implode(' and the first ', array_map(
+                    static fn (string $list): string => ObligationResource::BATCH . ' ' . $list,
+                    $cut
+                ))
             ));
         }
 

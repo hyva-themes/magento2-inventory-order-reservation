@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
 use Hyva\InventoryOrderReservation\Api\StockRegistrationInterface;
+use Hyva\InventoryOrderReservation\Console\OrderIdArguments;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\App\Area;
@@ -29,7 +30,8 @@ class RunOwedCommand extends Command
     public function __construct(
         private readonly ObligationResource $obligations,
         private readonly StockRegistrationInterface $registration,
-        private readonly State $appState
+        private readonly State $appState,
+        private readonly OrderIdArguments $orderIds
     ) {
         parent::__construct();
     }
@@ -55,7 +57,12 @@ class RunOwedCommand extends Command
         } catch (\Magento\Framework\Exception\LocalizedException) {
             $this->appState->setAreaCode(Area::AREA_GLOBAL);
         }
-        $ids = array_map('intval', (array) $input->getArgument('order-id'));
+        try {
+            $ids = $this->orderIds->parse((array) $input->getArgument('order-id'));
+        } catch (\InvalidArgumentException $e) {
+            $output->writeln(sprintf('<error>%s Nothing was run.</error>', OutputFormatter::escape($e->getMessage())));
+            return Cli::RETURN_FAILURE;
+        }
         if ($ids === []) {
             $ids = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
         } else {

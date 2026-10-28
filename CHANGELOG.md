@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 * Without Inventory, the price index is refreshed for the products whose stock status the registration changed, as the checkout does (`ReindexQuoteInventoryObserver`).
 
 ### Changed
+* The capabilities route reports the version Composer installed (`Composer\InstalledVersions`; `composer-runtime-api` ^2.0 is required), or `unknown` for a copy outside Composer, so no constant has to follow the tags.
 * `magento/module-sales` is required from 103.0.4 (Magento 2.4.4), the first release with `OrderMutexInterface`; the module is sequenced after `Magento_Store`, which it requires.
 
 ### Added

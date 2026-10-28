@@ -31,6 +31,8 @@ class Obligation
     public const SETTLED_BY_REGISTRATION = 'registration';
     public const SETTLED_BY_COMPENSATION = 'compensation';
     public const SETTLED_BY_BALANCED = 'balanced';
+    /** Closed with inventory:order-reservation:settle; no stock was written. */
+    public const SETTLED_BY_HAND = 'manual';
 
     public function __construct(
         public readonly int $orderId,

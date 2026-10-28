@@ -59,6 +59,7 @@ Each SKU row ends up in one of these states:
 - **Done by registration**: the stock was written.
 - **Done as balanced**: the existing reservations already accounted for what the order owes, so nothing had to be written.
 - **Done by compensation** (MSI only): a manual compensation through `inventory:reservation:create-compensations` balanced the row.
+- **Done by hand**: `inventory:order-reservation:settle` closed the row without writing stock.
 - **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, or part of the remainder being on a different stock because the website was assigned to another stock in the meantime. The reason is stored on the row. A refusal like this doesn't count as a failed attempt. A manual compensation resolves it, and `inventory:order-reservation:run <id>` retries the row.
 
 A row is also refused when its registration has failed 24 times. In that case the reason is the last error, and the row keeps its attempt count.
@@ -76,6 +77,8 @@ If a registration fails, it's retried in three ways:
 - Manually, with `bin/magento inventory:order-reservation:run`.
 
 Each failure counts as an attempt. After 24 failed attempts, which is about two hours of cron runs, the registration gives up and marks the order's owed rows as refused. Failing orders are retried after the others, so they never hold up the rest. The cron job and `inventory:order-reservation:run` without arguments skip refused orders. `inventory:order-reservation:run <id>` tries a named order again, refused or not, and starts counting its attempts from zero.
+
+`bin/magento inventory:order-reservation:settle <id>` closes an order's owed and refused rows without writing any stock. Use it after you have corrected the stock by hand. Without MSI, this is the only way to close a refused row, because there is no compensation command.
 
 `bin/magento inventory:order-reservation:list` shows which orders are owed or refused, and why the last attempt failed. When an order has been owed for more than an hour, an admin system message appears. For a refused row, the message appears right away.
 

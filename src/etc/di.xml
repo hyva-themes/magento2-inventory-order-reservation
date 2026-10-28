@@ -36,6 +36,7 @@
             <argument name="commands" xsi:type="array">
                 <item name="hyva_inventory_order_reservation_list" xsi:type="object">Hyva\InventoryOrderReservation\Console\Command\ListOwedCommand</item>
                 <item name="hyva_inventory_order_reservation_run" xsi:type="object">Hyva\InventoryOrderReservation\Console\Command\RunOwedCommand</item>
+                <item name="hyva_inventory_order_reservation_settle" xsi:type="object">Hyva\InventoryOrderReservation\Console\Command\SettleOwedCommand</item>
             </argument>
         </arguments>
     </type>

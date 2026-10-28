@@ -22,7 +22,7 @@
         <column xsi:type="int" name="stock_id" unsigned="true" nullable="true" comment="Inventory stock ID (null without Inventory)"/>
         <column xsi:type="varchar" name="mode" nullable="false" length="16" comment="inventory or legacy"/>
         <column xsi:type="varchar" name="status" nullable="false" length="16" default="owed" comment="owed, done or refused (given up after repeated failures)"/>
-        <column xsi:type="varchar" name="settled_by" nullable="true" length="32" comment="registration, compensation"/>
+        <column xsi:type="varchar" name="settled_by" nullable="true" length="32" comment="registration, balanced, compensation or manual"/>
         <column xsi:type="text" name="last_error" nullable="true" comment="The last failure, for the admin message"/>
         <column xsi:type="smallint" name="attempts" unsigned="true" nullable="false" default="0" comment="Attempts so far"/>
         <column xsi:type="timestamp" name="created_at" on_update="false" nullable="false" default="CURRENT_TIMESTAMP" comment="Created At"/>

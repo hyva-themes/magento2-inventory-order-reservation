@@ -161,6 +161,17 @@ class ObligationResource
     }
 
     /**
+     * Every owed or refused row of the order closed by hand, in the
+     * caller's transaction: no stock is written.
+     *
+     * @return int the rows closed
+     */
+    public function markOrderSettledByHand(int $orderId): int
+    {
+        return $this->settle(['order_id = ?' => $orderId], Obligation::SETTLED_BY_HAND);
+    }
+
+    /**
      * One sku of the order refused for a reason a placement cannot fix, in
      * the caller's transaction: a compensation repairs it, and `run <id>`
      * tries it again. No attempt is counted; the reason is the last error.
@@ -178,10 +189,11 @@ class ObligationResource
      * The rows matched, owed or refused, marked done in the caller's transaction.
      *
      * @param array<string, mixed> $where
+     * @return int the rows marked
      */
-    private function settle(array $where, string $settledBy): void
+    private function settle(array $where, string $settledBy): int
     {
-        $this->connection()->update(
+        return $this->connection()->update(
             $this->table(),
             [
                 'status' => Obligation::STATUS_DONE,

@@ -110,7 +110,7 @@ Hyvä POS (`Hyva_Pos`) plugs into the companion's handler to assign the register
 
 ## Without Magento Inventory
 
-On a store without MSI, the module registers the sale on the legacy stock item, the same way the checkout does. From then on, Magento's own legacy behaviour applies:
+On a store without MSI, the module registers the sale on the legacy stock item, the same way the checkout does. From then on, Magento's own legacy behavior applies:
 
 - A cancellation returns the quantity to stock only if "Set Items' Status to be In Stock When Order is Cancelled" is enabled (`cataloginventory/options/can_back_in_stock`, which `CancelOrderItemObserver` reads; enabled by default).
 - A credit memo returns the quantity only when it's set to return the items to stock.

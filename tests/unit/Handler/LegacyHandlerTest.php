@@ -11,6 +11,7 @@ namespace Hyva\InventoryOrderReservation\Test\Unit\Handler;
 
 use Hyva\InventoryOrderReservation\Model\Handler\LegacyHandler;
 use Hyva\InventoryOrderReservation\Model\Obligation;
+use Magento\Catalog\Model\Indexer\Product\Price\Processor as PriceIndexerProcessor;
 use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
 use Magento\CatalogInventory\Api\Data\StockItemInterface;
 use Magento\CatalogInventory\Api\StockManagementInterface;
@@ -62,6 +63,32 @@ class LegacyHandlerTest extends TestCase
         $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
     }
 
+    public function test_the_price_index_is_refreshed_for_the_items_whose_status_changed(): void
+    {
+        // the checkout's full save is the model's save(), not on the interface
+        $changed = $this->createStub(\Magento\CatalogInventory\Model\Stock\Item::class);
+        $changed->method('getProductId')->willReturn(200);
+        $management = $this->management();
+        $management->method('registerProductsSale')->willReturn([$changed]);
+        $prices = $this->priceIndexer();
+        $prices->expects(self::once())->method('reindexList')->with([200]);
+        $handler = $this->handler($management, $this->createStub(ProductResource::class), $this->createStub(StockRegistryInterface::class), $prices);
+        $handler->register($this->order(), [
+            new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100),
+            new Obligation(9, 'Spoon', 'simple', 1.0, 1, null, Obligation::MODE_LEGACY, productId: 200),
+        ]);
+    }
+
+    public function test_no_price_reindex_when_no_status_changed(): void
+    {
+        $management = $this->management();
+        $management->method('registerProductsSale')->willReturn([]);
+        $prices = $this->priceIndexer();
+        $prices->expects(self::never())->method('reindexList');
+        $handler = $this->handler($management, $this->createStub(ProductResource::class), $this->createStub(StockRegistryInterface::class), $prices);
+        $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
+    }
+
     /**
      * The interface names `registerProductsSale` in a docblock only; the
      * class declares it, so the mock is of the class.
@@ -71,13 +98,22 @@ class LegacyHandlerTest extends TestCase
         return $this->getMockBuilder(StockManagement::class)->disableOriginalConstructor()->onlyMethods(['registerProductsSale'])->getMock();
     }
 
-    private function handler(StockManagementInterface $management, ProductResource $products, StockRegistryInterface $registry): LegacyHandler
-    {
+    private function handler(
+        StockManagementInterface $management,
+        ProductResource $products,
+        StockRegistryInterface $registry,
+        ?PriceIndexerProcessor $prices = null
+    ): LegacyHandler {
         $state = $this->createMock(StockStateProviderInterface::class);
         $state->method('verifyStock')->willReturn(false);
         $indexer = $this->getMockBuilder(StockIndexerProcessor::class)->disableOriginalConstructor()->onlyMethods(['reindexList'])->getMock();
 
-        return new LegacyHandler($management, $products, $indexer, $registry, $state);
+        return new LegacyHandler($management, $products, $indexer, $registry, $state, $prices ?? $this->priceIndexer());
+    }
+
+    private function priceIndexer(): PriceIndexerProcessor
+    {
+        return $this->getMockBuilder(PriceIndexerProcessor::class)->disableOriginalConstructor()->onlyMethods(['reindexList'])->getMock();
     }
 
     private function order(): OrderInterface

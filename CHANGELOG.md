@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## Unreleased
+
+### Fixed
+* Without Inventory, the price index is refreshed for the products whose stock status the registration changed, as the checkout does (`ReindexQuoteInventoryObserver`).
+
 ## 0.1.0 (2026-10-28)
 
 ### Added

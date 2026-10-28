@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Model\Handler;
 
 use Hyva\InventoryOrderReservation\Model\Obligation;
+use Magento\Catalog\Model\Indexer\Product\Price\Processor as PriceIndexerProcessor;
 use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
 use Magento\CatalogInventory\Api\StockManagementInterface;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
@@ -24,7 +25,7 @@ use Magento\Sales\Api\Data\OrderInterface;
  * A store without Magento Inventory: the legacy sale registration, what
  * the quote submit does on checkout (`StockManagement::registerProductsSale`),
  * so the stock item reads what the shelf holds, with the stock index
- * refreshed for the rows whose status changed.
+ * refreshed, and the price index for the rows whose status changed.
  */
 class LegacyHandler implements HandlerInterface
 {
@@ -33,7 +34,8 @@ class LegacyHandler implements HandlerInterface
         private readonly ProductResource $productResource,
         private readonly StockIndexerProcessor $stockIndexerProcessor,
         private readonly StockRegistryInterface $stockRegistry,
-        private readonly StockStateProviderInterface $stockStateProvider
+        private readonly StockStateProviderInterface $stockStateProvider,
+        private readonly PriceIndexerProcessor $priceIndexerProcessor
     ) {
     }
 
@@ -110,6 +112,14 @@ class LegacyHandler implements HandlerInterface
         }
         if ($this->stockManagement instanceof StockManagement || $fullSave !== [] || $soldOut) {
             $this->stockIndexerProcessor->reindexList(array_keys($qtyByProduct));
+        }
+        // as the checkout does after the sale (ReindexQuoteInventoryObserver):
+        // the price index for the items whose stock status may have changed
+        $priceIds = $soldOut
+            ? array_keys($qtyByProduct)
+            : array_map(static fn ($stockItem): int => (int) $stockItem->getProductId(), $fullSave);
+        if ($priceIds !== []) {
+            $this->priceIndexerProcessor->reindexList($priceIds);
         }
     }
 

@@ -12,6 +12,7 @@ namespace Hyva\InventoryOrderReservation\Test\Unit\Model;
 use Hyva\InventoryOrderReservation\Model\Handler\HandlerInterface;
 use Hyva\InventoryOrderReservation\Model\Handler\InstallationProblemException;
 use Hyva\InventoryOrderReservation\Model\Handler\RowOutcome;
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
@@ -74,6 +75,20 @@ class StockRegistrationTest extends TestCase
         $handler->method('register')->willReturn([new RowOutcome($cup, RowOutcome::PLACED, -2.0), new RowOutcome($mug, RowOutcome::REFUSED, reason: 'surplus')]);
 
         self::assertTrue($this->registration($resource, $handler)->register(9));
+    }
+
+    public function test_rows_recorded_in_the_other_mode_are_refused_without_the_handler(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY);
+        $resource = $this->resource([$owed]);
+        $resource->expects(self::once())->method('markRowRefused')
+            ->with(9, 'mug', 'The order was recorded in legacy mode, but the store now runs in inventory mode; its stock cannot be registered as recorded.');
+        $resource->expects(self::never())->method('markRowDone');
+        $resource->expects(self::never())->method('recordFailure');
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        self::assertFalse($this->registration($resource, $handler)->register(9), 'nothing was written');
     }
 
     public function test_a_handler_that_answers_for_the_wrong_rows_fails_the_run(): void
@@ -233,6 +248,8 @@ class StockRegistrationTest extends TestCase
     {
         $readiness = $this->createMock(Readiness::class);
         $readiness->method('problem')->willReturn($problem);
+        $inventory = $this->createStub(InventoryPresence::class);
+        $inventory->method('mode')->willReturn(Obligation::MODE_INVENTORY);
         $mutex = $this->createMock(OrderMutexInterface::class);
         $mutex->method('execute')->willReturnCallback(static fn (int $orderId, callable $callable, array $args) => $callable(...$args));
         $orders = $this->createMock(OrderRepositoryInterface::class);
@@ -242,8 +259,9 @@ class StockRegistrationTest extends TestCase
             $resource,
             $orders,
             $this->createMock(LoggerInterface::class),
-            $this->handlers([Obligation::MODE_INVENTORY => $handler]),
-            $readiness
+            $this->handlers([Obligation::MODE_INVENTORY => $handler, Obligation::MODE_LEGACY => $handler]),
+            $readiness,
+            $inventory
         );
     }
 }

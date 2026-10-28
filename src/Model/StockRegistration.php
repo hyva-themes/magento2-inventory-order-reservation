@@ -42,7 +42,8 @@ class StockRegistration implements StockRegistrationInterface
         private readonly OrderRepositoryInterface $orderRepository,
         private readonly LoggerInterface $logger,
         private readonly \ArrayAccess $handlers,
-        private readonly Readiness $readiness
+        private readonly Readiness $readiness,
+        private readonly InventoryPresence $inventory
     ) {
     }
 
@@ -101,6 +102,22 @@ class StockRegistration implements StockRegistrationInterface
             throw new InstallationProblemException(__('%1', $problem));
         }
         $mode = $owed[0]->mode;
+        $storeMode = $this->inventory->mode();
+        if ($mode !== $storeMode && in_array($mode, [Obligation::MODE_INVENTORY, Obligation::MODE_LEGACY], true)) {
+            // recorded in one mode, registered in the other: the legacy
+            // deduction is a no-op with Inventory enabled, and an Inventory
+            // row has no handler without it. Nothing a retry fixes. A mode
+            // the module does not know stays a failure (no handler) below.
+            $reason = (string) __(
+                'The order was recorded in %1 mode, but the store now runs in %2 mode; its stock cannot be registered as recorded.',
+                $mode,
+                $storeMode
+            );
+            foreach ($owed as $row) {
+                $this->obligations->markRowRefused($orderId, $row->sku, $reason);
+            }
+            return false;
+        }
         $handler = $this->handlers[$mode] ?? null;
         if (!$handler instanceof HandlerInterface) {
             throw new LocalizedException(__('No stock registration handler for mode "%1".', $mode));

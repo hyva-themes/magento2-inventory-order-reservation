@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Hyva\InventoryOrderReservation\Test\Unit\Console;
 
 use Hyva\InventoryOrderReservation\Console\Command\SettleOwedCommand;
+use Hyva\InventoryOrderReservation\Console\OrderIdArguments;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Console\Cli;
 use Magento\Sales\Model\OrderMutexInterface;
@@ -34,7 +35,7 @@ class SettleOwedCommandTest extends TestCase
             $locked[] = $orderId;
             return $callable(...$args);
         });
-        $tester = new CommandTester(new SettleOwedCommand($obligations, $mutex));
+        $tester = new CommandTester(new SettleOwedCommand($obligations, $mutex, new OrderIdArguments()));
 
         self::assertSame(Cli::RETURN_SUCCESS, $tester->execute(['order-id' => ['7', '8']]));
         self::assertSame([7, 8], $locked);
@@ -46,9 +47,23 @@ class SettleOwedCommandTest extends TestCase
     {
         $mutex = $this->createStub(OrderMutexInterface::class);
         $mutex->method('execute')->willThrowException(new \RuntimeException('Lock wait timeout'));
-        $tester = new CommandTester(new SettleOwedCommand($this->createStub(ObligationResource::class), $mutex));
+        $tester = new CommandTester(new SettleOwedCommand($this->createStub(ObligationResource::class), $mutex, new OrderIdArguments()));
 
         self::assertSame(Cli::RETURN_FAILURE, $tester->execute(['order-id' => ['7']]));
         self::assertStringContainsString('order 7: Lock wait timeout', $tester->getDisplay());
+    }
+
+    public function test_malformed_ids_settle_nothing_even_beside_valid_ones(): void
+    {
+        foreach ([['42-POS'], ['42abc'], ['42,43'], ['abc'], ['0'], ['042'], ['4294967296'], ['7', '42abc']] as $arguments) {
+            $obligations = $this->createMock(ObligationResource::class);
+            $obligations->expects(self::never())->method('markOrderSettledByHand');
+            $mutex = $this->createMock(OrderMutexInterface::class);
+            $mutex->expects(self::never())->method('execute');
+            $tester = new CommandTester(new SettleOwedCommand($obligations, $mutex, new OrderIdArguments()));
+
+            self::assertSame(Cli::RETURN_FAILURE, $tester->execute(['order-id' => $arguments]), implode(' ', $arguments));
+            self::assertStringContainsString('Nothing was settled.', $tester->getDisplay());
+        }
     }
 }

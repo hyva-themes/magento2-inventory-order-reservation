@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 * `magento/module-sales` is required from 103.0.4 (Magento 2.4.4), the first release with `OrderMutexInterface`; the module is sequenced after `Magento_Store`, which it requires.
 
 ### Added
-* `inventory:order-reservation:settle <order id>` closes an order's owed and refused rows without writing stock (`settled_by` `manual`), under the order's lock, for stock corrected by hand: without Inventory, the only way to close a row the registration gave up on. The admin message and `inventory:order-reservation:list` name it there instead of the compensation command, which needs Inventory.
+* `inventory:order-reservation:settle <order id>` closes an order's owed and refused rows without writing stock (`settled_by` `manual`), under the order's lock, and settles nothing when any id given is not an order entity id, for stock corrected by hand: without Inventory, the only way to close a row the registration gave up on. The admin message and `inventory:order-reservation:list` name it there instead of the compensation command, which needs Inventory.
 
 ## 0.1.0 (2026-10-28)
 

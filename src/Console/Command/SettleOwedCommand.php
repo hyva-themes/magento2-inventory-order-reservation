@@ -9,10 +9,12 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
+use Hyva\InventoryOrderReservation\Console\OrderIdArguments;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
 use Magento\Framework\Console\Cli;
 use Magento\Sales\Model\OrderMutexInterface;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -30,7 +32,8 @@ class SettleOwedCommand extends Command
 {
     public function __construct(
         private readonly ObligationResource $obligations,
-        private readonly OrderMutexInterface $orderMutex
+        private readonly OrderMutexInterface $orderMutex,
+        private readonly OrderIdArguments $orderIds
     ) {
         parent::__construct();
     }
@@ -46,12 +49,18 @@ class SettleOwedCommand extends Command
     }
 
     /**
-     * Settles the rows of every order named; exits non-zero when one failed.
+     * Settles the rows of every order named; exits non-zero when one failed, and settles none when an id is malformed.
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        try {
+            $orderIds = $this->orderIds->parse((array) $input->getArgument('order-id'));
+        } catch (\InvalidArgumentException $e) {
+            $output->writeln(sprintf('<error>%s Nothing was settled.</error>', OutputFormatter::escape($e->getMessage())));
+            return Cli::RETURN_FAILURE;
+        }
         $failed = 0;
-        foreach (array_map('intval', (array) $input->getArgument('order-id')) as $orderId) {
+        foreach ($orderIds as $orderId) {
             try {
                 $settled = (int) $this->orderMutex->execute($orderId, $this->obligations->markOrderSettledByHand(...), [$orderId]);
                 $output->writeln(sprintf(

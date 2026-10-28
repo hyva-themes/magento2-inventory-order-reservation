@@ -24,6 +24,8 @@ use Magento\Sales\Model\OrderMutexInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
+// phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+
 class StockRegistrationTest extends TestCase
 {
     public function test_an_owed_row_placed_by_the_handler_is_done_by_registration(): void
@@ -89,6 +91,51 @@ class StockRegistrationTest extends TestCase
         $handler->expects(self::never())->method('register');
 
         self::assertFalse($this->registration($resource, $handler)->register(9), 'nothing was written');
+    }
+
+    public function test_inventory_rows_on_a_store_that_disabled_inventory_are_refused_without_the_handler(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->resource([$owed]);
+        $resource->expects(self::once())->method('markRowRefused')
+            ->with(9, 'mug', 'The order was recorded in inventory mode, but the store now runs in legacy mode; its stock cannot be registered as recorded. '
+                . 'inventory:order-reservation:settle closes it once the stock is corrected by hand.');
+        $resource->expects(self::never())->method('markRowDone');
+        $resource->expects(self::never())->method('recordFailure');
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        self::assertFalse($this->registration($resource, $handler, storeMode: Obligation::MODE_LEGACY)->register(9), 'nothing was written');
+    }
+
+    public function test_every_row_of_an_order_recorded_in_the_other_mode_is_refused(): void
+    {
+        $cup = new Obligation(9, 'cup', 'simple', 1.0, 1, 2, Obligation::MODE_INVENTORY);
+        $mug = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
+        $resource = $this->resource([$cup, $mug]);
+        $refused = [];
+        $resource->expects(self::exactly(2))->method('markRowRefused')
+            ->willReturnCallback(static function (int $orderId, string $sku) use (&$refused): void {
+                $refused[] = $sku;
+            });
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        $this->registration($resource, $handler, storeMode: Obligation::MODE_LEGACY)->register(9);
+        self::assertSame(['cup', 'mug'], $refused);
+    }
+
+    public function test_an_unknown_mode_on_a_legacy_store_is_a_failure_not_a_refusal(): void
+    {
+        $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, 'held');
+        $resource = $this->resource([$owed]);
+        $resource->expects(self::never())->method('markRowRefused');
+        $resource->expects(self::once())->method('recordFailure')->with(9, 'No stock registration handler for mode "held".')->willReturn(1);
+        $handler = $this->createMock(HandlerInterface::class);
+        $handler->expects(self::never())->method('register');
+
+        $this->expectExceptionMessage('No stock registration handler for mode "held"');
+        $this->registration($resource, $handler, storeMode: Obligation::MODE_LEGACY)->register(9);
     }
 
     public function test_a_handler_that_answers_for_the_wrong_rows_fails_the_run(): void
@@ -189,6 +236,7 @@ class StockRegistrationTest extends TestCase
     {
         $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, 'held');
         $resource = $this->resource([$owed]);
+        $resource->expects(self::never())->method('markRowRefused');
         $resource->expects(self::once())->method('recordFailure')->willReturn(1);
         $handler = $this->createMock(HandlerInterface::class);
         $handler->expects(self::never())->method('register');
@@ -244,12 +292,16 @@ class StockRegistrationTest extends TestCase
         };
     }
 
-    private function registration(ObligationResource $resource, HandlerInterface $handler, ?string $problem = null): StockRegistration
-    {
+    private function registration(
+        ObligationResource $resource,
+        HandlerInterface $handler,
+        ?string $problem = null,
+        string $storeMode = Obligation::MODE_INVENTORY
+    ): StockRegistration {
         $readiness = $this->createStub(Readiness::class);
         $readiness->method('problem')->willReturn($problem);
         $inventory = $this->createStub(InventoryPresence::class);
-        $inventory->method('mode')->willReturn(Obligation::MODE_INVENTORY);
+        $inventory->method('mode')->willReturn($storeMode);
         $mutex = $this->createStub(OrderMutexInterface::class);
         $mutex->method('execute')->willReturnCallback(static fn (int $orderId, callable $callable, array $args) => $callable(...$args));
         $orders = $this->createStub(OrderRepositoryInterface::class);

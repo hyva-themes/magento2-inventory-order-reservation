@@ -22,7 +22,7 @@ interface CapabilitiesInterface
     public const PROBLEM = 'problem';
 
     /**
-     * The module's version, as its composer package declares it.
+     * The module's release, for a client that compares versions.
      * @return string
      */
     public function getVersion(): string;

@@ -17,8 +17,9 @@ use Magento\Store\Model\StoreManagerInterface;
 class CapabilitiesService implements CapabilitiesInterface
 {
     /**
-     * The release this source is at; the composer package's version for
-     * a client that compares.
+     * The release this source is at, the only place the version is kept:
+     * the composer package takes its version from the git tag, so this
+     * changes with every release.
      */
     public const VERSION = '0.1.0';
 

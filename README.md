@@ -1,95 +1,99 @@
-# Stock for orders created through Magento's order API
+# Stock handling for orders created through Magento's order API
 
-`Hyva_InventoryOrderReservation` gives an order created through `POST /V1/orders` the stock side of a placed order, on request.
+Orders created through `POST /V1/orders` don't touch stock the way orders placed through the checkout do. `Hyva_InventoryOrderReservation` closes that gap for API clients that ask for it: it reserves or deducts the stock for such an order, as if the order had been placed.
 
-## The gap it closes
+## The problem
 
-`POST /V1/orders` is the order repository's save. Magento treats it as an import, not as placing an order, so nothing of the placement lifecycle runs:
+`POST /V1/orders` calls the order repository's `save()` method. Magento treats this as importing an order, not as placing one, so none of the steps that normally run when an order is placed take place:
 
-- with Magento Inventory (MSI), no `order_placed` reservation is written. That reservation comes from a plugin on `OrderManagementInterface::place`, which the cart flow calls and which has no REST route;
-- without MSI, the legacy stock deduction does not run either. It runs on quote submit only.
+- With Magento Inventory (MSI), no `order_placed` reservation is written. That reservation is created by a plugin on `OrderManagementInterface::place()`. The checkout calls that method, but it has no REST route.
+- Without MSI, the legacy stock deduction doesn't run either. It only runs when a quote is submitted.
 
-So an integration that creates orders this way and ships them (a point of sale, an ERP booking counter sales, a marketplace connector) leaves the website's salable quantity too high by what it sold. The shipment deducts the source and adds its compensating reservation, but the placement that should balance it never happened. Magento has had this on record since 2020 as [magento/inventory#3185](https://github.com/magento/inventory/issues/3185), confirmed by Adobe twice.
+As a result, an integration that creates orders this way and then ships them (a point of sale, an ERP that books counter sales, a marketplace connector) leaves the website's salable quantity too high by the amount it sold. The shipment deducts the quantity from the source and adds a compensating reservation, but the placement reservation that the compensation is meant to balance was never written.
 
-## What it does
+Magento has known about this since 2020: [magento/inventory#3185](https://github.com/magento/inventory/issues/3185). Adobe has confirmed the issue twice.
 
-The module adds one boolean extension attribute to the order, `reserve_stock`. It is absent by default, and `POST /V1/orders` behaves exactly as before for callers that do not send it.
+## What the module does
+
+The module adds one boolean extension attribute to the order: `reserve_stock`. It isn't set by default, so `POST /V1/orders` behaves exactly as before for clients that don't send it.
 
 ```http
 POST /rest/V1/orders
 {"entity": {"...": "...", "extension_attributes": {"reserve_stock": true}}}
 ```
 
-When a new order carries the attribute, the module writes the stock side of the order:
+When a new order has `reserve_stock` set, the module writes the stock side of the order:
 
-- on a store with MSI, the companion package `hyva-themes/magento2-inventory-order-reservation-msi` places the `order_placed` reservation, one row per sku, for what the order still owes. A shipment, a cancellation or a manual compensation that happened earlier is already on the rows and is not placed again;
-- on a store without MSI, the module registers the sale on the legacy stock items, through `StockManagement::registerProductsSale`, the same call the quote submit makes.
+- On a store with MSI, the companion package `hyva-themes/magento2-inventory-order-reservation-msi` places the `order_placed` reservation, one row per SKU, for the quantity the order still owes. A shipment, cancellation or manual compensation that happened earlier is already reflected in the reservations and isn't placed a second time.
+- On a store without MSI, the module registers the sale on the legacy stock items by calling `StockManagement::registerProductsSale()`, the same method the checkout calls when a quote is submitted.
 
-### Ask the store first
+### Check that the store supports it
 
-An extension attribute no module declares is refused by Magento's input validation, so a client should ask whether the store takes it before posting:
+Magento's input validation rejects extension attributes that no module declares. A client should therefore check whether the store accepts `reserve_stock` before sending it:
 
 ```http
 GET /rest/V1/inventory/order-reservation
 {"version": "0.1.0", "mode": "inventory", "attribute": "reserve_stock", "ready": true, "problem": null}
 ```
 
-- `mode` is `inventory` when `Magento_InventorySales` is enabled, `legacy` otherwise.
-- `ready` says whether registration actually runs for the website you asked on: the handler for the mode is installed (with MSI, that is the companion package), MSI's modules are enabled, and the website sells from a stock.
-- `problem` names what is missing when `ready` is false.
+- `mode` is `inventory` when `Magento_InventorySales` is enabled, and `legacy` otherwise.
+- `ready` tells you whether stock registration actually works for the website the request was made for. For that, the handler for the mode must be installed (with MSI, that's the companion package), the MSI modules must be enabled, and the website must be assigned to a stock.
+- `problem` names what's missing when `ready` is `false`.
 
-The route needs the ACL resource `Hyva_InventoryOrderReservation::capabilities`.
+The route requires the ACL resource `Hyva_InventoryOrderReservation::capabilities`.
 
-## How it stays exactly once
+## How stock is registered exactly once
 
-### The record
+### Recording what the order owes
 
-The order's save writes one row per sku into `hyva_inventory_order_stock_registration`: the quantity ordered at that moment, the product type, the website and the stock it sells from, and the store's mode. The stock is read with one query from `inventory_stock_sales_channel`, the same table Magento's own website-to-stock lookup reads, so the save constructs nothing from MSI. Later edits to the order never change these rows.
+When the order is saved, the module writes one row per SKU to the `hyva_inventory_order_stock_registration` table. Each row holds the quantity ordered at that moment, the product type, the website, the stock the website sells from, and the store's mode. The stock is looked up with a single query on `inventory_stock_sales_channel`, the same table Magento's own website-to-stock lookup reads, so saving the order doesn't instantiate anything from MSI. Later changes to the order never modify these rows.
 
-### The registration
+While an order has rows waiting to be registered, this README calls it *owed*.
 
-Registration runs after the order's transaction has committed, under Magento's own order lock (`OrderMutexInterface`, a transaction with `SELECT … FOR UPDATE` on the order row). The stock write and the state of each row land in that one transaction. If anything fails, all of it rolls back and the order stays owed. Two runners for the same order are serialized by the lock; the second one finds nothing left to do.
+### Registering the stock
 
-Each sku's row ends in one of three states:
+Registration runs after the order's transaction has been committed, under Magento's own order lock (`OrderMutexInterface`, which opens a transaction and locks the order row with `SELECT … FOR UPDATE`). The stock write and the new state of each row are saved in that single transaction. If anything fails, all of it is rolled back and the order stays owed. If two processes register the same order at the same time, the lock makes them run one after the other, and the second one finds nothing left to do.
 
-- **done by registration**: the stock was written;
-- **done as balanced**: the rows already said what the order owes, nothing had to be written;
-- **refused**: something a placement cannot fix, such as more reserved than the order owes, or a remainder on another stock after the website was moved. The reason is stored on the row. A refusal counts no attempt; a manual compensation repairs it, and `inventory:order-reservation:run <id>` tries the row again.
+Each SKU row ends up in one of three states:
 
-The order is complete when every row is done. The listing, the admin message and the run command name refused rows with their reason.
+- **Done by registration**: the stock was written.
+- **Done as balanced**: the existing reservations already accounted for what the order owes, so nothing had to be written.
+- **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, or part of the remainder being on a different stock because the website was assigned to another stock in the meantime. The reason is stored on the row. A refusal doesn't count as a failed attempt. A manual compensation resolves it, and `inventory:order-reservation:run <id>` retries the row.
 
-This all relies on the sales tables and the inventory tables sharing one database connection, which is every store since Magento removed the split database. The module checks it and refuses the step otherwise.
+An order is complete once all its rows are done. The listing, the admin message and the run command show refused rows together with their reason.
+
+All of this depends on the sales tables and the inventory tables sharing one database connection. That's the case on every store since Magento removed the split database. The module checks this and refuses to register the stock otherwise.
 
 ### Recovery
 
-If a registration fails, three things try again:
+If a registration fails, it's retried in three ways:
 
-- the order's next save. An invoice or a shipment brings one within seconds for most integrations;
-- a cron job every five minutes, for orders owed longer than two minutes;
-- `bin/magento inventory:order-reservation:run`, by hand.
+- On the order's next save. For most integrations, an invoice or a shipment follows within seconds.
+- By a cron job that runs every five minutes and picks up orders that have been owed for more than two minutes.
+- Manually, with `bin/magento inventory:order-reservation:run`.
 
-`bin/magento inventory:order-reservation:list` shows what is owed and why the last attempt failed. Orders owed longer than an hour raise an admin system message.
+`bin/magento inventory:order-reservation:list` shows which orders are owed and why the last attempt failed. When an order has been owed for more than an hour, an admin system message appears.
 
-A missing handler package, or an MSI module that is disabled, is an installation problem and not the order's fault. Orders sent with the attribute are still accepted and stay owed, with no attempt counted. The admin message, the listing and the capabilities route name the problem right away. Once it is fixed, the next registration completes them with whatever still remains. Refusing sales because a server package is missing would be the worse outcome.
+A missing handler package or a disabled MSI module is an installation problem, not a problem with the order. Orders sent with `reserve_stock` are still accepted. They stay owed, and no failed attempt is counted. The admin message, the listing and the capabilities route report the problem immediately. Once it's fixed, the next registration completes these orders with whatever they still owe. Rejecting sales because a server package is missing would be the worse outcome.
 
 ## Magento's repair tools
 
-With MSI, the companion package hooks into `inventory:reservation:create-compensations` and `inventory:reservation:list-inconsistencies`, so a manual compensation for an order this module knows about is checked against what the order really still owes, and the listing leaves out skus this module still has to register. The companion's README describes the rules.
+With MSI, the companion package hooks into `inventory:reservation:create-compensations` and `inventory:reservation:list-inconsistencies`. A manual compensation for an order this module tracks is checked against what the order actually still owes, and the inconsistency listing leaves out SKUs this module still has to register. The companion package's README describes the rules.
 
-## Installing
+## Installation
 
 ```sh
 composer require hyva-themes/magento2-inventory-order-reservation
 bin/magento setup:upgrade
 ```
 
-On a store with MSI, install the companion package as well. It holds everything that names an MSI interface and is sequenced on the MSI modules:
+On a store with MSI, also install the companion package. It contains everything that references an MSI interface, and its module is sequenced after the MSI modules:
 
 ```sh
 composer require hyva-themes/magento2-inventory-order-reservation-msi
 ```
 
-This package itself has no dependency on MSI, and none on any other Hyvä package. It installs on a store without MSI and takes the legacy path there.
+This package doesn't depend on MSI or on any other Hyvä package. It can be installed on a store without MSI and uses the legacy path there.
 
 ### Updating with Hyvä POS
 
@@ -97,27 +101,27 @@ Hyvä POS (`Hyva_Pos`) plugs into the companion's handler to assign the register
 
 ## Without Magento Inventory
 
-On a store without MSI the module registers the sale on the legacy stock item, the way the checkout does. From there on everything is Magento's own legacy behaviour:
+On a store without MSI, the module registers the sale on the legacy stock item, the same way the checkout does. From then on, Magento's own legacy behaviour applies:
 
-- a cancellation returns the unit only when "Set Items' Status to be In Stock When Order is Cancelled" is on (`cataloginventory/options/can_back_in_stock`, what `CancelOrderItemObserver` reads; on by default);
-- a credit memo returns it only when asked to;
-- a shipment moves nothing.
+- A cancellation returns the quantity to stock only if "Set Items' Status to be In Stock When Order is Cancelled" is enabled (`cataloginventory/options/can_back_in_stock`, which `CancelOrderItemObserver` reads; enabled by default).
+- A credit memo returns the quantity only when it's set to return the items to stock.
+- A shipment doesn't change the stock.
 
-A registration that runs after one of those events ends in the same place a checkout-placed order would.
+If the registration runs after one of these events, the result is the same as for an order placed through the checkout.
 
-One special case: a line the stock item cannot cover (backorders off, and the register sold the last units anyway) makes `registerProductsSale` refuse the whole sale, as it refuses a storefront checkout but not an admin order. The goods have left the shop, so the module deducts the line the way an admin order's is deducted, past zero, and the item reads out of stock. With MSI a placement never refuses for quantity, so both modes end in the same place.
+There is one special case. If the stock item can't cover a line (backorders are disabled, and the shop sold the last units at the register anyway), `registerProductsSale` rejects the entire sale. It does the same for a storefront checkout, but not for an admin order. Because the goods have already left the shop, the module then deducts the line the way an admin order does: past zero, which marks the item as out of stock. With MSI, placing a reservation never fails because of the quantity, so both modes end up in the same state.
 
-## Working on the module
+## Development
 
-This package installs on a Magento with or without MSI, and `setup:di:compile` reflects every constructor on either. That is why no class here names an MSI type. The mode comes from the module list (`Model\InventoryPresence`), the website's stock from one table, and everything that needs an MSI interface lives in the companion package. The handlers sit in a lazy map (`Magento\Framework\ObjectManager\TMap`) keyed by mode; the companion adds its handler to that map in its own `di.xml`.
+This package can be installed on Magento with or without MSI, and `setup:di:compile` reflects every constructor in both cases. That's why no class in this package references an MSI type. The mode is determined from the module list (`Model\InventoryPresence`), the website's stock is read from a single table, and everything that needs an MSI interface lives in the companion package. The handlers are kept in a lazy map (`Magento\Framework\ObjectManager\TMap`) keyed by mode. The companion package adds its handler to that map in its own `di.xml`.
 
-Unit tests run against a borrowed Magento vendor directory:
+The unit tests run against the vendor directory of an existing Magento installation:
 
 ```sh
 MAGENTO_VENDOR_PATH=/path/to/magento/vendor/autoload.php php phpunit-10.phar
 ```
 
-Integration tests run inside a development store, booted through `app/bootstrap.php`. They place orders for one sku (`bed-walnut-cane` in the Koti sample data) and put its stock back after every test. Run them from the module directory under the store:
+The integration tests run inside a development store, which they boot through `app/bootstrap.php`. They place orders for a single SKU (`bed-walnut-cane` from the Koti sample data) and restore its stock after each test. Run them from the module's directory inside the store:
 
 ```sh
 MAGENTO_ROOT=/var/www/html php phpunit-10.phar -c phpunit.integration.xml.dist

@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
@@ -25,7 +26,8 @@ class ListOwedCommand extends Command
 {
     public function __construct(
         private readonly ObligationResource $obligations,
-        private readonly Readiness $readiness
+        private readonly Readiness $readiness,
+        private readonly InventoryPresence $inventory
     ) {
         parent::__construct();
     }
@@ -45,8 +47,15 @@ class ListOwedCommand extends Command
         if ($problem !== null) {
             $output->writeln('<comment>Stock registration cannot run: ' . OutputFormatter::escape($problem) . '</comment>');
         }
-        $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
-        $refusedIds = $this->obligations->orderIdsRefused();
+        // one past the batch, to tell a full batch from a cut one
+        $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'), ObligationResource::BATCH + 1);
+        $refusedIds = $this->obligations->orderIdsRefused(ObligationResource::BATCH + 1);
+        $cut = array_keys(array_filter([
+            'owed' => count($owedIds) > ObligationResource::BATCH,
+            'refused' => count($refusedIds) > ObligationResource::BATCH,
+        ]));
+        $owedIds = array_slice($owedIds, 0, ObligationResource::BATCH);
+        $refusedIds = array_slice($refusedIds, 0, ObligationResource::BATCH);
         if ($owedIds === [] && $refusedIds === []) {
             $output->writeln('<info>No order owes its stock registration.</info>');
             return Cli::RETURN_SUCCESS;
@@ -70,16 +79,30 @@ class ListOwedCommand extends Command
                     continue;
                 }
                 $output->writeln(sprintf(
-                    '<comment>order %d  sku %s  qty %s  mode %s  refused%s%s  (a compensation repairs it; inventory:order-reservation:run %d tries again)</comment>',
+                    '<comment>order %d  sku %s  qty %s  mode %s  refused%s%s  (%s; inventory:order-reservation:run %d tries again)</comment>',
                     $orderId,
                     OutputFormatter::escape($obligation->sku),
                     $this->qty($obligation),
                     $obligation->mode,
                     $obligation->attempts > 0 ? sprintf(' after %d attempts', $obligation->attempts) : '',
                     $this->lastError($obligation),
+                    // a compensation needs an Inventory row on a store that still runs Inventory
+                    $obligation->mode === Obligation::MODE_INVENTORY && $this->inventory->isInventory()
+                        ? 'a compensation repairs it'
+                        : sprintf('inventory:order-reservation:settle %d closes it once the stock is corrected by hand', $orderId),
                     $orderId
                 ));
             }
+        }
+
+        if ($cut !== []) {
+            $output->writeln(sprintf(
+                '<comment>Only the first %s orders are listed.</comment>',
+                implode(' and the first ', array_map(
+                    static fn (string $list): string => ObligationResource::BATCH . ' ' . $list,
+                    $cut
+                ))
+            ));
         }
 
         return Cli::RETURN_SUCCESS;

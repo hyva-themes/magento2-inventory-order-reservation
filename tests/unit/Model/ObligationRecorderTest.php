@@ -37,7 +37,7 @@ class ObligationRecorderTest extends TestCase
     public function test_a_flagged_order_is_recorded_per_product_with_the_quantity_ordered(): void
     {
         $inserted = [];
-        $resource = $this->createMock(ObligationResource::class);
+        $resource = $this->createStub(ObligationResource::class);
         $resource->method('insert')->willReturnCallback(function (array $rows) use (&$inserted): void {
             $inserted = $rows;
         });
@@ -69,7 +69,7 @@ class ObligationRecorderTest extends TestCase
     public function test_a_line_is_recorded_under_the_catalogs_sku_not_the_lines(): void
     {
         $this->catalog = [300 => ['sku' => 'SHIRT', 'type' => 'simple']];
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->legacy());
+        $recorder = $this->recorder($this->createStub(ObligationResource::class), $this->legacy());
         $rows = $recorder->record($this->order(5, [$this->item(1, 300, 'SHIRT-engr', 'simple', 1.0)], flagged: true));
         self::assertCount(1, $rows);
         self::assertSame('SHIRT', $rows[0]->sku, 'the custom-option sku of the line is not what the stock is keyed by');
@@ -79,7 +79,7 @@ class ObligationRecorderTest extends TestCase
     public function test_a_composite_parent_is_left_to_its_child_whether_or_not_the_payload_links_them(): void
     {
         $this->catalog = [10 => ['sku' => 'shirt', 'type' => 'configurable'], 11 => ['sku' => 'shirt-m-blue', 'type' => 'simple']];
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->legacy());
+        $recorder = $this->recorder($this->createStub(ObligationResource::class), $this->legacy());
         // the parent names the child's sku under its own type, and the
         // child has no parent id yet when the order's items are not saved
         $parent = $this->item(1, 10, 'shirt-m-blue', 'configurable', 1.0);
@@ -98,7 +98,7 @@ class ObligationRecorderTest extends TestCase
     public function test_a_grouped_products_lines_are_its_children(): void
     {
         $this->catalog = [40 => ['sku' => 'spoon', 'type' => 'simple']];
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->legacy());
+        $recorder = $this->recorder($this->createStub(ObligationResource::class), $this->legacy());
         // the line carries the grouped parent's type; the catalog's type for the product decides
         $rows = $recorder->record($this->order(6, [$this->item(1, 40, 'spoon', 'grouped', 2.0)], flagged: true));
         self::assertCount(1, $rows);
@@ -108,7 +108,7 @@ class ObligationRecorderTest extends TestCase
     public function test_a_product_gone_from_the_catalog_keeps_the_lines_sku_and_type(): void
     {
         $this->catalog = [];
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->legacy());
+        $recorder = $this->recorder($this->createStub(ObligationResource::class), $this->legacy());
         $rows = $recorder->record($this->order(7, [$this->item(1, 999, 'gone', 'simple', 1.0)], flagged: true));
         self::assertCount(1, $rows);
         self::assertSame('gone', $rows[0]->sku);
@@ -117,7 +117,7 @@ class ObligationRecorderTest extends TestCase
 
     public function test_recorded_means_rows_exist_for_the_order(): void
     {
-        $resource = $this->createMock(ObligationResource::class);
+        $resource = $this->createStub(ObligationResource::class);
         $resource->method('hasRowsFor')->willReturnMap([[77, true], [78, false]]);
         $recorder = $this->recorder($resource, $this->inventory(true));
         self::assertTrue($recorder->isRecorded($this->order(77, [], flagged: true)));
@@ -126,14 +126,14 @@ class ObligationRecorderTest extends TestCase
 
     public function test_an_order_without_the_flag_is_not_requested(): void
     {
-        $recorder = $this->recorder($this->createMock(ObligationResource::class), $this->inventory(true));
+        $recorder = $this->recorder($this->createStub(ObligationResource::class), $this->inventory(true));
         self::assertFalse($recorder->isRequested($this->order(1, [], flagged: false)));
         self::assertFalse($recorder->isRequested($this->order(1, [], flagged: null)));
     }
 
     private function recorder(ObligationResource $resource, InventoryPresence $inventory): ObligationRecorder
     {
-        $products = $this->createMock(ProductIdentities::class);
+        $products = $this->createStub(ProductIdentities::class);
         $products->method('byProductIds')->willReturnCallback(
             fn (array $ids): array => array_intersect_key($this->catalog, array_flip(array_map('intval', $ids)))
         );
@@ -151,7 +151,7 @@ class ObligationRecorderTest extends TestCase
      */
     private function inventory(bool $present): InventoryPresence
     {
-        $inventory = $this->createMock(InventoryPresence::class);
+        $inventory = $this->createStub(InventoryPresence::class);
         $inventory->method('isInventory')->willReturn($present);
         $inventory->method('mode')->willReturn($present ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY);
         return $inventory;
@@ -169,9 +169,9 @@ class ObligationRecorderTest extends TestCase
 
     private function websites(string $code): WebsiteRepositoryInterface
     {
-        $website = $this->createMock(WebsiteInterface::class);
+        $website = $this->createStub(WebsiteInterface::class);
         $website->method('getCode')->willReturn($code);
-        $repository = $this->createMock(WebsiteRepositoryInterface::class);
+        $repository = $this->createStub(WebsiteRepositoryInterface::class);
         $repository->method('getById')->willReturn($website);
 
         return $repository;
@@ -179,9 +179,7 @@ class ObligationRecorderTest extends TestCase
 
     private function item(int $id, int $productId, string $sku, string $type, float $qty): Item
     {
-        $item = $this->getMockBuilder(Item::class)->disableOriginalConstructor()
-            ->onlyMethods(['getItemId', 'getProductId', 'getSku', 'getProductType', 'getQtyOrdered'])
-            ->getMock();
+        $item = $this->createStub(Item::class);
         $item->method('getItemId')->willReturn($id);
         $item->method('getProductId')->willReturn($productId);
         $item->method('getSku')->willReturn($sku);
@@ -196,7 +194,7 @@ class ObligationRecorderTest extends TestCase
      */
     private function order(int $id, array $items, ?bool $flagged): OrderInterface
     {
-        $store = $this->createMock(StoreInterface::class);
+        $store = $this->createStub(StoreInterface::class);
         $store->method('getWebsiteId')->willReturn(1);
         // the extension attribute as the generated interface carries it where
         // the module is installed; a plain object answers the same on any vendor
@@ -210,8 +208,7 @@ class ObligationRecorderTest extends TestCase
                 return $this->flagged;
             }
         };
-        $order = $this->getMockBuilder(\Magento\Sales\Model\Order::class)->disableOriginalConstructor()
-            ->onlyMethods(['getEntityId', 'getItems', 'getStore', 'getExtensionAttributes'])->getMock();
+        $order = $this->createStub(\Magento\Sales\Model\Order::class);
         $order->method('getEntityId')->willReturn($id);
         $order->method('getItems')->willReturn($items);
         $order->method('getStore')->willReturn($store);

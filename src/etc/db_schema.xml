@@ -11,7 +11,7 @@
          ordered, per sku, and whether its stock side has been registered.
          Written in the order's own save; never rewritten by later edits to
          the order; the only record this module consults. -->
-    <table name="hyva_inventory_order_stock_registration" resource="default" engine="innodb" onCreate="migrateDataFrom(inventory_order_stock_registration)" comment="Stock registration owed by orders created through the API">
+    <table name="hyva_inventory_order_stock_registration" resource="default" engine="innodb" comment="Stock registration owed by orders created through the API">
         <column xsi:type="int" name="entity_id" unsigned="true" nullable="false" identity="true" comment="Entity ID"/>
         <column xsi:type="int" name="order_id" unsigned="true" nullable="false" comment="Order ID"/>
         <column xsi:type="int" name="product_id" unsigned="true" nullable="true" comment="Product ID the line was recorded for"/>
@@ -22,7 +22,7 @@
         <column xsi:type="int" name="stock_id" unsigned="true" nullable="true" comment="Inventory stock ID (null without Inventory)"/>
         <column xsi:type="varchar" name="mode" nullable="false" length="16" comment="inventory or legacy"/>
         <column xsi:type="varchar" name="status" nullable="false" length="16" default="owed" comment="owed, done or refused (given up after repeated failures)"/>
-        <column xsi:type="varchar" name="settled_by" nullable="true" length="32" comment="registration, compensation"/>
+        <column xsi:type="varchar" name="settled_by" nullable="true" length="32" comment="registration, balanced, compensation or manual"/>
         <column xsi:type="text" name="last_error" nullable="true" comment="The last failure, for the admin message"/>
         <column xsi:type="smallint" name="attempts" unsigned="true" nullable="false" default="0" comment="Attempts so far"/>
         <column xsi:type="timestamp" name="created_at" on_update="false" nullable="false" default="CURRENT_TIMESTAMP" comment="Created At"/>

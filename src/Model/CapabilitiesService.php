@@ -16,17 +16,12 @@ use Magento\Store\Model\StoreManagerInterface;
 
 class CapabilitiesService implements CapabilitiesInterface
 {
-    /**
-     * The release this source is at; the composer package's version for
-     * a client that compares.
-     */
-    public const VERSION = '1.0.0';
-
     public function __construct(
         private readonly CapabilitiesFactory $capabilitiesFactory,
         private readonly InventoryPresence $inventory,
         private readonly Readiness $readiness,
-        private readonly StoreManagerInterface $storeManager
+        private readonly StoreManagerInterface $storeManager,
+        private readonly PackageVersion $packageVersion
     ) {
     }
 
@@ -37,7 +32,7 @@ class CapabilitiesService implements CapabilitiesInterface
     {
         $problem = $this->readiness->problem((int) $this->storeManager->getStore()->getWebsiteId());
         return $this->capabilitiesFactory->create([
-            'version' => self::VERSION,
+            'version' => $this->packageVersion->get(),
             'mode' => $this->inventory->mode(),
             'ready' => $problem === null,
             'problem' => $problem,

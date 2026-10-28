@@ -11,12 +11,14 @@ namespace Hyva\InventoryOrderReservation\Model\Handler;
 
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
+use Magento\CatalogInventory\Api\StockConfigurationInterface;
 use Magento\CatalogInventory\Api\StockManagementInterface;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
-use Magento\CatalogInventory\Model\Spi\StockStateProviderInterface;
 use Magento\CatalogInventory\Model\StockStateException;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
+use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
 use Magento\CatalogInventory\Model\StockManagement;
+use Magento\CatalogInventory\Model\StockRegistryStorage;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Api\Data\OrderInterface;
 
@@ -24,7 +26,9 @@ use Magento\Sales\Api\Data\OrderInterface;
  * A store without Magento Inventory: the legacy sale registration, what
  * the quote submit does on checkout (`StockManagement::registerProductsSale`),
  * so the stock item reads what the shelf holds, with the stock index
- * refreshed for the rows whose status changed.
+ * refreshed for the rows whose status changed. The price index follows
+ * from the stock item's own save, which queues it after the commit when
+ * the item's stock status changes.
  */
 class LegacyHandler implements HandlerInterface
 {
@@ -33,7 +37,9 @@ class LegacyHandler implements HandlerInterface
         private readonly ProductResource $productResource,
         private readonly StockIndexerProcessor $stockIndexerProcessor,
         private readonly StockRegistryInterface $stockRegistry,
-        private readonly StockStateProviderInterface $stockStateProvider
+        private readonly StockResource $stockResource,
+        private readonly StockConfigurationInterface $stockConfiguration,
+        private readonly StockRegistryStorage $stockRegistryStorage
     ) {
     }
 
@@ -106,7 +112,7 @@ class LegacyHandler implements HandlerInterface
             // (backorders off) is deducted the way an admin order's is,
             // past zero, instead of staying owed for good.
             $soldOut = true;
-            $this->deductPastZero($qtyByProduct, $skuByProduct, $websiteId);
+            $this->deductPastZero($qtyByProduct, $skuByProduct);
         }
         if ($this->stockManagement instanceof StockManagement || $fullSave !== [] || $soldOut) {
             $this->stockIndexerProcessor->reindexList(array_keys($qtyByProduct));
@@ -116,20 +122,36 @@ class LegacyHandler implements HandlerInterface
     /**
      * What `registerProductsSale` does without its quantity check, which
      * the admin area's stock item skips: the quantity taken off each
-     * item and its in-stock flag read again.
+     * item, saved through the stock item repository, which decides the
+     * in-stock flag as it does for a checkout's sale: an item it takes out
+     * of stock is marked as changed automatically, so a later replenishment
+     * puts it back in stock, and an item set out of stock by hand stays so.
+     *
+     * The quantity comes from the stock rows, read under the lock
+     * `registerProductsSale` took on them in this transaction, as that
+     * method reads it, and the stock item is loaded afresh, as that method
+     * loads it: one the registry cached earlier in the process (a cron run
+     * registers many orders) may be out of date, and its save writes every
+     * field it holds.
      *
      * @param array<int, float> $qtyByProduct
      * @param array<int, string> $skuByProduct
      */
-    private function deductPastZero(array $qtyByProduct, array $skuByProduct, int $websiteId): void
+    private function deductPastZero(array $qtyByProduct, array $skuByProduct): void
     {
+        $scopeId = (int) $this->stockConfiguration->getDefaultScopeId();
+        $locked = $this->stockResource->lockProductsStock(array_keys($qtyByProduct), $scopeId);
         foreach ($qtyByProduct as $productId => $qty) {
-            $stockItem = $this->stockRegistry->getStockItem($productId, $websiteId);
+            $row = $locked[$productId] ?? null;
+            if (!isset($row['qty']) || !$this->stockConfiguration->isQty((string) ($row['type_id'] ?? ''))) {
+                continue;
+            }
+            $this->stockRegistryStorage->removeStockItem($productId);
+            $stockItem = $this->stockRegistry->getStockItem($productId, $scopeId);
             if (!$stockItem->getItemId() || !$stockItem->getManageStock()) {
                 continue;
             }
-            $stockItem->setQty((float) $stockItem->getQty() - $qty);
-            $stockItem->setIsInStock($this->stockStateProvider->verifyStock($stockItem));
+            $stockItem->setQty((float) $row['qty'] - $qty);
             $this->stockRegistry->updateStockItemBySku($skuByProduct[$productId], $stockItem);
         }
     }

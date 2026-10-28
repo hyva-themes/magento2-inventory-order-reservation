@@ -20,11 +20,12 @@ use Magento\Sales\Api\Data\OrderInterface;
  * side gets its obligation rows here, so they commit with the order or
  * not at all. Every later save of the order passes through untouched.
  *
- * "New" is read off the model's original data, which Magento sets on a
- * load and never on a save: an order object saved twice in one request
- * (a plugin that invoices it right after placement saves it again) reads
- * as new both times. The rows on record are the tiebreak, so the second
- * save records nothing instead of hitting the unique key and failing the
+ * "New" is the mark MarkNewOrderObserver set before the save: the order
+ * had no id when the save began. An order object saved twice in one
+ * request (a plugin that invoices it right after placement saves it
+ * again) carries its id on the second save and is not new then. The rows
+ * on record are a second guard, so a save that still reads as new records
+ * nothing twice instead of hitting the unique key and failing the
  * caller's transaction.
  */
 class RecordObligationObserver implements ObserverInterface

@@ -4,7 +4,7 @@ Orders created through `POST /V1/orders` don't touch stock the way orders placed
 
 ## The problem
 
-`POST /V1/orders` calls the order repository's `save()` method. Magento treats this as importing an order, not as placing one, so none of the steps that normally run when an order is placed take place:
+`POST /V1/orders` calls the order repository's `save()` method, and so does `PUT /V1/orders/create`. Everything below applies to both routes. Magento treats this as importing an order, not as placing one, so none of the steps that normally run when an order is placed take place:
 
 - With Magento Inventory (MSI), no `order_placed` reservation is written. That reservation is created by a plugin on `OrderManagementInterface::place()`. The checkout calls that method, but it has no REST route.
 - Without MSI, the legacy stock deduction doesn't run either. It only runs when a quote is submitted.
@@ -33,12 +33,12 @@ Magento's input validation rejects extension attributes that no module declares.
 
 ```http
 GET /rest/V1/inventory/order-reservation
-{"version": "0.1.0", "mode": "inventory", "attribute": "reserve_stock", "ready": true, "problem": null}
+{"version": "0.1.0", "mode": "inventory", "attribute": "reserve_stock", "ready": true}
 ```
 
 - `mode` is `inventory` when `Magento_InventorySales` is enabled, and `legacy` otherwise.
-- `ready` tells you whether stock registration actually works for the website the request was made for. For that, the handler for the mode must be installed (with MSI, that's the companion package), the MSI modules must be enabled, and the website must be assigned to a stock.
-- `problem` names what's missing when `ready` is `false`.
+- `ready` tells you whether stock registration actually works for the website of the store view in the request URL (`/rest/<store_code>/V1/...`). Under `/rest/all/V1/...` that is the admin website, which has no stock, so `ready` is `false` there. For that, the handler for the mode must be installed (with MSI, that's the companion package), the MSI modules must be enabled, and the website must be assigned to a stock.
+- `problem` names what's missing when `ready` is `false`. When `ready` is `true`, the field isn't in the response.
 
 The route requires the ACL resource `Hyva_InventoryOrderReservation::capabilities`.
 
@@ -54,11 +54,14 @@ While an order has rows waiting to be registered, this README calls it *owed*.
 
 Registration runs after the order's transaction has been committed, under Magento's own order lock (`OrderMutexInterface`, which opens a transaction and locks the order row with `SELECT … FOR UPDATE`). The stock write and the new state of each row are saved in that single transaction. If anything fails, all of it is rolled back and the order stays owed. If two processes register the same order at the same time, the lock makes them run one after the other, and the second one finds nothing left to do.
 
-Each SKU row ends up in one of three states:
+Each SKU row ends up in one of these states:
 
 - **Done by registration**: the stock was written.
 - **Done as balanced**: the existing reservations already accounted for what the order owes, so nothing had to be written.
-- **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, or part of the remainder being on a different stock because the website was assigned to another stock in the meantime. The reason is stored on the row. A refusal doesn't count as a failed attempt. A manual compensation resolves it, and `inventory:order-reservation:run <id>` retries the row.
+- **Done by compensation** (MSI only): a manual compensation through `inventory:reservation:create-compensations` balanced the row.
+- **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, or part of the remainder being on a different stock because the website was assigned to another stock in the meantime. The reason is stored on the row. A refusal like this doesn't count as a failed attempt. A manual compensation resolves it, and `inventory:order-reservation:run <id>` retries the row.
+
+A row is also refused when its registration has failed 24 times. In that case the reason is the last error, and the row keeps its attempt count.
 
 An order is complete once all its rows are done. The listing, the admin message and the run command show refused rows together with their reason.
 
@@ -72,7 +75,9 @@ If a registration fails, it's retried in three ways:
 - By a cron job that runs every five minutes and picks up orders that have been owed for more than two minutes.
 - Manually, with `bin/magento inventory:order-reservation:run`.
 
-`bin/magento inventory:order-reservation:list` shows which orders are owed and why the last attempt failed. When an order has been owed for more than an hour, an admin system message appears.
+Each failure counts as an attempt. After 24 failed attempts, which is about two hours of cron runs, the registration gives up and marks the order's owed rows as refused. Failing orders are retried after the others, so they never hold up the rest. The cron job and `inventory:order-reservation:run` without arguments skip refused orders. `inventory:order-reservation:run <id>` tries a named order again, refused or not, and starts counting its attempts from zero.
+
+`bin/magento inventory:order-reservation:list` shows which orders are owed or refused, and why the last attempt failed. When an order has been owed for more than an hour, an admin system message appears. For a refused row, the message appears right away.
 
 A missing handler package or a disabled MSI module is an installation problem, not a problem with the order. Orders sent with `reserve_stock` are still accepted. They stay owed, and no failed attempt is counted. The admin message, the listing and the capabilities route report the problem immediately. Once it's fixed, the next registration completes these orders with whatever they still owe. Rejecting sales because a server package is missing would be the worse outcome.
 
@@ -109,7 +114,7 @@ On a store without MSI, the module registers the sale on the legacy stock item, 
 
 If the registration runs after one of these events, the result is the same as for an order placed through the checkout.
 
-There is one special case. If the stock item can't cover a line (backorders are disabled, and the shop sold the last units at the register anyway), `registerProductsSale` rejects the entire sale. It does the same for a storefront checkout, but not for an admin order. Because the goods have already left the shop, the module then deducts the line the way an admin order does: past zero, which marks the item as out of stock. With MSI, placing a reservation never fails because of the quantity, so both modes end up in the same state.
+There is one special case. If the stock item can't cover a line (backorders are disabled, and the shop sold the last units at the register anyway), `registerProductsSale` rejects the entire sale and deducts nothing. It does the same for a storefront checkout, but not for an admin order. Because the goods have already left the shop, the module then deducts every line of the sale the way an admin order does, without the quantity check. The line that wasn't covered goes past zero, which marks the item as out of stock. With MSI, placing a reservation never fails because of the quantity, so both modes end up in the same state.
 
 ## Development
 
@@ -121,7 +126,7 @@ The unit tests run against the vendor directory of an existing Magento installat
 MAGENTO_VENDOR_PATH=/path/to/magento/vendor/autoload.php php phpunit-10.phar
 ```
 
-The integration tests run inside a development store, which they boot through `app/bootstrap.php`. They place orders for a single SKU (`bed-walnut-cane` from the Koti sample data) and restore its stock after each test. Run them from the module's directory inside the store:
+The integration tests run inside a development store, which they boot through `app/bootstrap.php`. They place orders for two SKUs from the Koti sample data (`bed-walnut-cane` and `bedding-linen-white`) and restore their stock after each test. Run them from the module's directory inside the store:
 
 ```sh
 MAGENTO_ROOT=/var/www/html php phpunit-10.phar -c phpunit.integration.xml.dist

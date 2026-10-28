@@ -32,6 +32,11 @@
     "suggest": {
         "hyva-themes/magento2-inventory-order-reservation-msi": "On a store with Magento Inventory: the handler that places the reservation and the coordination of Magento's repair tools. Required there; a store without Inventory takes the legacy path with this package alone."
     },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0.x-dev"
+        }
+    },
     "autoload": {
         "files": [
             "src/registration.php"

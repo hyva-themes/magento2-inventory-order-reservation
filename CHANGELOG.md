@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 * Without Inventory, a line deducted past zero is taken off the stock row's quantity as read under the lock `registerProductsSale` took, and on a stock item loaded afresh, not on one the registry may have cached earlier in the process; a product type without quantity is left alone there, as `registerProductsSale` leaves it.
 
 ### Changed
-* The capabilities route reports the version Composer installed (`Composer\InstalledVersions`; `composer-runtime-api` ^2.0 is required), or `unknown` for a copy outside Composer, so no constant has to follow the tags.
+* The capabilities route reports the version Composer installed (`Composer\InstalledVersions`; `composer-runtime-api` ^2.0 is required), or `unknown` for a copy outside Composer, so no constant has to follow the tags. `dev-main` is aliased as `0.1.x-dev`, so a branch install still satisfies the companion package's `^0.1`.
 * `magento/module-sales` is required from 103.0.4 (Magento 2.4.4), the first release with `OrderMutexInterface`; the module is sequenced after `Magento_Store`, which it requires.
 
 ### Added

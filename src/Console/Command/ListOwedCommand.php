@@ -47,8 +47,12 @@ class ListOwedCommand extends Command
         if ($problem !== null) {
             $output->writeln('<comment>Stock registration cannot run: ' . OutputFormatter::escape($problem) . '</comment>');
         }
-        $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'));
-        $refusedIds = $this->obligations->orderIdsRefused();
+        // one past the batch, to tell a full batch from a cut one
+        $owedIds = $this->obligations->orderIdsOwed(gmdate('Y-m-d H:i:s'), ObligationResource::BATCH + 1);
+        $refusedIds = $this->obligations->orderIdsRefused(ObligationResource::BATCH + 1);
+        $truncated = count($owedIds) > ObligationResource::BATCH || count($refusedIds) > ObligationResource::BATCH;
+        $owedIds = array_slice($owedIds, 0, ObligationResource::BATCH);
+        $refusedIds = array_slice($refusedIds, 0, ObligationResource::BATCH);
         if ($owedIds === [] && $refusedIds === []) {
             $output->writeln('<info>No order owes its stock registration.</info>');
             return Cli::RETURN_SUCCESS;
@@ -88,7 +92,7 @@ class ListOwedCommand extends Command
             }
         }
 
-        if (count($owedIds) >= ObligationResource::BATCH || count($refusedIds) >= ObligationResource::BATCH) {
+        if ($truncated) {
             $output->writeln(sprintf(
                 '<comment>Only the first %d owed and the first %d refused orders are listed.</comment>',
                 ObligationResource::BATCH,

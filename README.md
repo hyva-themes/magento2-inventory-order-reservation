@@ -61,7 +61,7 @@ Each SKU row ends up in one of these states:
 - **Done as balanced**: the existing reservations already accounted for what the order owes, so nothing had to be written.
 - **Done by compensation** (MSI only): a manual compensation through `inventory:reservation:create-compensations` balanced the row.
 - **Done by hand**: `inventory:order-reservation:settle` closed the row without writing stock.
-- **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, part of the remainder being on a different stock because the website was assigned to another stock in the meantime, or the store having switched between MSI and legacy mode since the order was recorded. The reason is stored on the row. A refusal like this doesn't count as a failed attempt. A manual compensation resolves it, and `inventory:order-reservation:run <id>` retries the row.
+- **Refused**: something is wrong that placing a reservation can't fix. Examples are more being reserved than the order owes, part of the remainder being on a different stock because the website was assigned to another stock in the meantime, or the store having switched between MSI and legacy mode since the order was recorded. The reason is stored on the row. A refusal like this doesn't count as a failed attempt. On an MSI stock, a manual compensation resolves it. After a switch between MSI and legacy mode there is nothing to compensate, so `inventory:order-reservation:settle <id>` closes the row once you've corrected the stock by hand. In both cases, `inventory:order-reservation:run <id>` retries the row.
 
 A row is also refused when its registration has failed 24 times. In that case the reason is the last error, and the row keeps its attempt count.
 

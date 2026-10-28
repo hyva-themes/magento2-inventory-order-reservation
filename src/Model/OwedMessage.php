@@ -74,9 +74,10 @@ class OwedMessage implements MessageInterface
         }
         if ($summary['refused'] > 0 && $this->inventory->isInventory()) {
             return (string) __(
-                'The stock registration of %1 order(s) created through the API was refused, after repeated failures or for a discrepancy only a compensation repairs, and %2 still owe it. '
+                'The stock registration of %1 order(s) created through the API was refused, and %2 still owe it. '
                 . 'Read bin/magento inventory:order-reservation:list for the reasons; inventory:order-reservation:run <order id> tries one again, '
-                . 'and a compensation through inventory:reservation:create-compensations settles it.',
+                . 'a compensation through inventory:reservation:create-compensations settles a refused row on an Inventory stock, '
+                . 'and inventory:order-reservation:settle <order id> closes the rows without writing stock, once the stock is corrected by hand.',
                 $summary['refused'],
                 $summary['count']
             );
@@ -84,7 +85,7 @@ class OwedMessage implements MessageInterface
         if ($summary['refused'] > 0) {
             // without Inventory there is no compensation command
             return (string) __(
-                'The stock registration of %1 order(s) created through the API was given up after repeated failures, and %2 still owe it. '
+                'The stock registration of %1 order(s) created through the API was refused, and %2 still owe it. '
                 . 'Read bin/magento inventory:order-reservation:list for the reasons; inventory:order-reservation:run <order id> tries one again, '
                 . 'and inventory:order-reservation:settle <order id> closes it without writing stock, once the stock is corrected by hand.',
                 $summary['refused'],

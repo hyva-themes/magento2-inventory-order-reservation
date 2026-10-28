@@ -109,7 +109,8 @@ class StockRegistration implements StockRegistrationInterface
             // row has no handler without it. Nothing a retry fixes. A mode
             // the module does not know stays a failure (no handler) below.
             $reason = (string) __(
-                'The order was recorded in %1 mode, but the store now runs in %2 mode; its stock cannot be registered as recorded.',
+                'The order was recorded in %1 mode, but the store now runs in %2 mode; its stock cannot be registered as recorded. '
+                . 'inventory:order-reservation:settle closes it once the stock is corrected by hand.',
                 $mode,
                 $storeMode
             );

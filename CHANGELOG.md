@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 * The owed and refused lookups group by order, so "tried least first" sorts each order by its most-tried row instead of an arbitrary one; `inventory:order-reservation:list` says when it shows only the first 200 orders.
-* An order recorded in one mode and registered after the store switched to the other (Inventory enabled or disabled in between) has its rows refused with the reason, instead of being marked done by a legacy deduction Inventory turns into a no-op, or failing 24 times for a missing handler.
+* An order recorded in one mode and registered after the store switched to the other (Inventory enabled or disabled in between) has its rows refused with the reason, instead of being marked done by a legacy deduction Inventory turns into a no-op, or failing 24 times for a missing handler. The reason points to `inventory:order-reservation:settle`: no compensation applies to such a row.
 * Without Inventory, a line deducted past zero is taken off the stock row's quantity as read under the lock `registerProductsSale` took, and on a stock item loaded afresh, not on one the registry may have cached earlier in the process; a product type without quantity is left alone there, as `registerProductsSale` leaves it.
 
 ### Changed

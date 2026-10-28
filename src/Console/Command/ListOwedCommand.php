@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Hyva\InventoryOrderReservation\Console\Command;
 
+use Hyva\InventoryOrderReservation\Model\InventoryPresence;
 use Hyva\InventoryOrderReservation\Model\Obligation;
 use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\ResourceModel\ObligationResource;
@@ -25,7 +26,8 @@ class ListOwedCommand extends Command
 {
     public function __construct(
         private readonly ObligationResource $obligations,
-        private readonly Readiness $readiness
+        private readonly Readiness $readiness,
+        private readonly InventoryPresence $inventory
     ) {
         parent::__construct();
     }
@@ -77,7 +79,8 @@ class ListOwedCommand extends Command
                     $obligation->mode,
                     $obligation->attempts > 0 ? sprintf(' after %d attempts', $obligation->attempts) : '',
                     $this->lastError($obligation),
-                    $obligation->mode === Obligation::MODE_INVENTORY
+                    // a compensation needs an Inventory row on a store that still runs Inventory
+                    $obligation->mode === Obligation::MODE_INVENTORY && $this->inventory->isInventory()
                         ? 'a compensation repairs it'
                         : sprintf('inventory:order-reservation:settle %d closes it once the stock is corrected by hand', $orderId),
                     $orderId

@@ -82,7 +82,7 @@ class StockRegistrationTest extends TestCase
         $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY);
         $resource = $this->resource([$owed]);
         $resource->expects(self::once())->method('markRowRefused')
-            ->with(9, 'mug', 'The order was recorded in legacy mode, but the store now runs in inventory mode; its stock cannot be registered as recorded.');
+            ->with(9, 'mug', 'The order was recorded in legacy mode, but the store now runs in inventory mode; its stock cannot be registered as recorded. inventory:order-reservation:settle closes it once the stock is corrected by hand.');
         $resource->expects(self::never())->method('markRowDone');
         $resource->expects(self::never())->method('recordFailure');
         $handler = $this->createMock(HandlerInterface::class);

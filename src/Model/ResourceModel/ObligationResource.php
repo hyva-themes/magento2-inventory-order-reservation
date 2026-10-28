@@ -21,6 +21,8 @@ use Magento\Framework\DB\Adapter\AdapterInterface;
 class ObligationResource
 {
     public const TABLE = 'hyva_inventory_order_stock_registration';
+    /** Orders per lookup: a cron run, a run without ids, a listing. */
+    public const BATCH = 200;
 
     public function __construct(
         private readonly ResourceConnection $resourceConnection
@@ -113,18 +115,19 @@ class ObligationResource
      *
      * @return int[]
      */
-    public function orderIdsOwed(string $before, int $limit = 200): array
+    public function orderIdsOwed(string $before, int $limit = self::BATCH): array
     {
         $connection = $this->connection();
         $select = $connection->select()
-            ->distinct()
             ->from($this->table(), ['order_id'])
             ->where('status = ?', Obligation::STATUS_OWED)
             ->where('attempts < ?', Obligation::MAX_ATTEMPTS)
             ->where('created_at < ?', $before)
+            ->group('order_id')
             // the orders tried least first, so a few that keep failing never
-            // hold the rest back
-            ->order(['attempts', 'created_at'])
+            // hold the rest back; per order, as DISTINCT would leave it open
+            // which row's attempts the order sorts by
+            ->order(['MAX(attempts) ASC', 'MIN(created_at) ASC', 'order_id ASC'])
             ->limit($limit);
         return array_map('intval', $connection->fetchCol($select));
     }
@@ -257,14 +260,14 @@ class ObligationResource
     /**
      * Ids of orders the registration gave up on.
      */
-    public function orderIdsRefused(int $limit = 200): array
+    public function orderIdsRefused(int $limit = self::BATCH): array
     {
         $connection = $this->connection();
         $select = $connection->select()
-            ->distinct()
             ->from($this->table(), ['order_id'])
             ->where('status = ?', Obligation::STATUS_REFUSED)
-            ->order('created_at')
+            ->group('order_id')
+            ->order(['MIN(created_at) ASC', 'order_id ASC'])
             ->limit($limit);
 
         return array_map('intval', $connection->fetchCol($select));

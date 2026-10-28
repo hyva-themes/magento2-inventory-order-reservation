@@ -85,6 +85,14 @@ class ListOwedCommand extends Command
             }
         }
 
+        if (count($owedIds) >= ObligationResource::BATCH || count($refusedIds) >= ObligationResource::BATCH) {
+            $output->writeln(sprintf(
+                '<comment>Only the first %d owed and the first %d refused orders are listed.</comment>',
+                ObligationResource::BATCH,
+                ObligationResource::BATCH
+            ));
+        }
+
         return Cli::RETURN_SUCCESS;
     }
 

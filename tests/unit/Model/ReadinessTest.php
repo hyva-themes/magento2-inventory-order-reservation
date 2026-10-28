@@ -63,7 +63,7 @@ class ReadinessTest extends TestCase
      */
     private function readiness(bool $inventory, array $missing, array $handlers, ?int $stockId): Readiness
     {
-        $presence = $this->createMock(InventoryPresence::class);
+        $presence = $this->createStub(InventoryPresence::class);
         $presence->method('mode')->willReturn($inventory ? Obligation::MODE_INVENTORY : Obligation::MODE_LEGACY);
         $presence->method('missingModules')->willReturn($missing);
         $pool = new class (array_fill_keys($handlers, true)) implements \ArrayAccess {
@@ -93,9 +93,9 @@ class ReadinessTest extends TestCase
         };
         $websiteStock = $this->createMock(WebsiteStock::class);
         $websiteStock->method('idForWebsiteCode')->with('base')->willReturn($stockId);
-        $website = $this->createMock(WebsiteInterface::class);
+        $website = $this->createStub(WebsiteInterface::class);
         $website->method('getCode')->willReturn('base');
-        $websites = $this->createMock(WebsiteRepositoryInterface::class);
+        $websites = $this->createStub(WebsiteRepositoryInterface::class);
         $websites->method('getById')->willReturn($website);
         return new Readiness($presence, $pool, $websiteStock, $websites);
     }

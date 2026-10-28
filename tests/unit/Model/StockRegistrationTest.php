@@ -44,7 +44,7 @@ class StockRegistrationTest extends TestCase
         $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
         $resource = $this->resource([$owed]);
         $resource->expects(self::once())->method('markRowDone')->with(9, 'mug', Obligation::SETTLED_BY_BALANCED);
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willReturn([new RowOutcome($owed, RowOutcome::BALANCED)]);
 
         self::assertTrue($this->registration($resource, $handler)->register(9));
@@ -58,7 +58,7 @@ class StockRegistrationTest extends TestCase
         $resource->expects(self::never())->method('markRowDone');
         $resource->expects(self::never())->method('recordFailure');
         $resource->expects(self::never())->method('markRefused');
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willReturn([new RowOutcome($owed, RowOutcome::REFUSED, reason: 'stock 2 holds +1.0000 past what the order owes', remainders: [2 => 1.0])]);
 
         self::assertTrue($this->registration($resource, $handler)->register(9), 'the run completed; the row is a result, not a failure');
@@ -71,7 +71,7 @@ class StockRegistrationTest extends TestCase
         $resource = $this->resource([$cup, $mug]);
         $resource->expects(self::once())->method('markRowDone')->with(9, 'cup', Obligation::SETTLED_BY_REGISTRATION);
         $resource->expects(self::once())->method('markRowRefused')->with(9, 'mug', 'surplus');
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willReturn([new RowOutcome($cup, RowOutcome::PLACED, -2.0), new RowOutcome($mug, RowOutcome::REFUSED, reason: 'surplus')]);
 
         self::assertTrue($this->registration($resource, $handler)->register(9));
@@ -97,7 +97,7 @@ class StockRegistrationTest extends TestCase
         $resource = $this->resource([$owed]);
         $resource->expects(self::never())->method('markRowDone');
         $resource->expects(self::once())->method('recordFailure')->with(9, self::stringContains('wrong rows'))->willReturn(1);
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willReturn([]);
 
         $this->expectException(LocalizedException::class);
@@ -122,7 +122,7 @@ class StockRegistrationTest extends TestCase
         $resource->expects(self::never())->method('markRowDone');
         $resource->expects(self::once())->method('recordFailure')->with(9, 'Inventory refused')->willReturn(1);
         $resource->expects(self::never())->method('markRefused');
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willThrowException(new LocalizedException(__('Inventory refused')));
 
         $this->expectException(LocalizedException::class);
@@ -134,7 +134,7 @@ class StockRegistrationTest extends TestCase
         $owed = new Obligation(9, 'mug', 'simple', 2.0, 1, 2, Obligation::MODE_INVENTORY);
         $resource = $this->resource([$owed]);
         $resource->expects(self::once())->method('recordFailure')->with(9, 'SQLSTATE[HY000]: the table is gone')->willReturn(1);
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willThrowException(new \RuntimeException('SQLSTATE[HY000]: the table is gone'));
 
         try {
@@ -153,7 +153,7 @@ class StockRegistrationTest extends TestCase
         $resource = $this->resource([$owed]);
         $resource->method('recordFailure')->willReturn(Obligation::MAX_ATTEMPTS);
         $resource->expects(self::once())->method('markRefused')->with(9);
-        $handler = $this->createMock(HandlerInterface::class);
+        $handler = $this->createStub(HandlerInterface::class);
         $handler->method('register')->willThrowException(new LocalizedException(__('Some of the products are out of stock.')));
         $this->expectException(LocalizedException::class);
         $this->registration($resource, $handler)->register(9);
@@ -246,19 +246,19 @@ class StockRegistrationTest extends TestCase
 
     private function registration(ObligationResource $resource, HandlerInterface $handler, ?string $problem = null): StockRegistration
     {
-        $readiness = $this->createMock(Readiness::class);
+        $readiness = $this->createStub(Readiness::class);
         $readiness->method('problem')->willReturn($problem);
         $inventory = $this->createStub(InventoryPresence::class);
         $inventory->method('mode')->willReturn(Obligation::MODE_INVENTORY);
-        $mutex = $this->createMock(OrderMutexInterface::class);
+        $mutex = $this->createStub(OrderMutexInterface::class);
         $mutex->method('execute')->willReturnCallback(static fn (int $orderId, callable $callable, array $args) => $callable(...$args));
-        $orders = $this->createMock(OrderRepositoryInterface::class);
-        $orders->method('get')->willReturn($this->createMock(OrderInterface::class));
+        $orders = $this->createStub(OrderRepositoryInterface::class);
+        $orders->method('get')->willReturn($this->createStub(OrderInterface::class));
         return new StockRegistration(
             $mutex,
             $resource,
             $orders,
-            $this->createMock(LoggerInterface::class),
+            $this->createStub(LoggerInterface::class),
             $this->handlers([Obligation::MODE_INVENTORY => $handler, Obligation::MODE_LEGACY => $handler]),
             $readiness,
             $inventory

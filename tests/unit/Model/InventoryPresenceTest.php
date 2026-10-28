@@ -43,7 +43,7 @@ class InventoryPresenceTest extends TestCase
     /** @param string[] $enabled */
     private function presence(array $enabled): InventoryPresence
     {
-        $manager = $this->createMock(Manager::class);
+        $manager = $this->createStub(Manager::class);
         $manager->method('isEnabled')->willReturnCallback(static fn (string $module): bool => in_array($module, $enabled, true));
         return new InventoryPresence($manager);
     }

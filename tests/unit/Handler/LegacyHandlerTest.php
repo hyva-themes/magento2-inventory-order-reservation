@@ -41,7 +41,7 @@ class LegacyHandlerTest extends TestCase
         $management->expects(self::once())->method('registerProductsSale')->with([100 => 2.0, 200 => 1.0], 1)->willReturn([]);
         $products = $this->createMock(ProductResource::class);
         $products->expects(self::never())->method('getProductsIdsBySkus');
-        $handler = $this->handler($management, $products, $this->createMock(StockRegistryInterface::class));
+        $handler = $this->handler($management, $products, $this->createStub(StockRegistryInterface::class));
         $handler->register($this->order(), [
             new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100),
             new Obligation(9, 'Spoon', 'simple', 1.0, 1, null, Obligation::MODE_LEGACY, productId: 200),
@@ -50,7 +50,7 @@ class LegacyHandlerTest extends TestCase
 
     public function test_a_sold_out_line_is_deducted_past_zero_from_the_locked_quantity(): void
     {
-        $management = $this->management();
+        $management = $this->createStub(StockManagement::class);
         $management->method('registerProductsSale')->willThrowException(new StockStateException(__('Some of the products are out of stock.')));
         $stockItem = $this->createMock(StockItemInterface::class);
         $stockItem->method('getItemId')->willReturn(5);
@@ -62,17 +62,17 @@ class LegacyHandlerTest extends TestCase
         $registry = $this->createMock(StockRegistryInterface::class);
         $registry->method('getStockItem')->with(100, 0)->willReturn($stockItem);
         $registry->expects(self::once())->method('updateStockItemBySku')->with('mug', $stockItem);
-        $handler = $this->handler($management, $this->createMock(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'simple']]);
+        $handler = $this->handler($management, $this->createStub(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'simple']]);
         $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
     }
 
     public function test_a_type_without_quantity_is_not_deducted_past_zero(): void
     {
-        $management = $this->management();
+        $management = $this->createStub(StockManagement::class);
         $management->method('registerProductsSale')->willThrowException(new StockStateException(__('Some of the products are out of stock.')));
         $registry = $this->createMock(StockRegistryInterface::class);
         $registry->expects(self::never())->method('updateStockItemBySku');
-        $handler = $this->handler($management, $this->createMock(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'not-qty']]);
+        $handler = $this->handler($management, $this->createStub(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'not-qty']]);
         $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
     }
 
@@ -81,7 +81,7 @@ class LegacyHandlerTest extends TestCase
         // the checkout's full save is the model's save(), not on the interface
         $changed = $this->createStub(\Magento\CatalogInventory\Model\Stock\Item::class);
         $changed->method('getProductId')->willReturn(200);
-        $management = $this->management();
+        $management = $this->createStub(StockManagement::class);
         $management->method('registerProductsSale')->willReturn([$changed]);
         $prices = $this->priceIndexer();
         $prices->expects(self::once())->method('reindexList')->with([200]);
@@ -94,7 +94,7 @@ class LegacyHandlerTest extends TestCase
 
     public function test_no_price_reindex_when_no_status_changed(): void
     {
-        $management = $this->management();
+        $management = $this->createStub(StockManagement::class);
         $management->method('registerProductsSale')->willReturn([]);
         $prices = $this->priceIndexer();
         $prices->expects(self::never())->method('reindexList');
@@ -118,17 +118,17 @@ class LegacyHandlerTest extends TestCase
         ?PriceIndexerProcessor $prices = null,
         array $locked = []
     ): LegacyHandler {
-        $state = $this->createMock(StockStateProviderInterface::class);
+        $state = $this->createStub(StockStateProviderInterface::class);
         $state->method('verifyStock')->willReturn(false);
-        $indexer = $this->getMockBuilder(StockIndexerProcessor::class)->disableOriginalConstructor()->onlyMethods(['reindexList'])->getMock();
+        $indexer = $this->createStub(StockIndexerProcessor::class);
 
-        $stockResource = $this->createMock(StockResource::class);
+        $stockResource = $this->createStub(StockResource::class);
         $stockResource->method('lockProductsStock')->willReturn($locked);
-        $configuration = $this->createMock(StockConfigurationInterface::class);
+        $configuration = $this->createStub(StockConfigurationInterface::class);
         $configuration->method('getDefaultScopeId')->willReturn(0);
         $configuration->method('isQty')->willReturnCallback(static fn (string $type): bool => $type === 'simple');
 
-        return new LegacyHandler($management, $products, $indexer, $registry, $state, $prices ?? $this->priceIndexer(), $stockResource, $configuration);
+        return new LegacyHandler($management, $products, $indexer, $registry, $state, $prices ?? $this->createStub(PriceIndexerProcessor::class), $stockResource, $configuration);
     }
 
     private function priceIndexer(): PriceIndexerProcessor
@@ -138,9 +138,9 @@ class LegacyHandlerTest extends TestCase
 
     private function order(): OrderInterface
     {
-        $store = $this->createMock(StoreInterface::class);
+        $store = $this->createStub(StoreInterface::class);
         $store->method('getWebsiteId')->willReturn(1);
-        $order = $this->getMockBuilder(\Magento\Sales\Model\Order::class)->disableOriginalConstructor()->onlyMethods(['getStore'])->getMock();
+        $order = $this->createStub(\Magento\Sales\Model\Order::class);
         $order->method('getStore')->willReturn($store);
 
         return $order;

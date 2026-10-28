@@ -38,7 +38,7 @@ GET /rest/V1/inventory/order-reservation
 
 - `version` is the package version Composer installed, for example `0.1.2`, or `dev-main` for a branch install. Outside Composer it's `unknown`.
 - `mode` is `inventory` when `Magento_InventorySales` is enabled, and `legacy` otherwise.
-- `ready` tells you whether stock registration actually works for the website of the store view in the request URL (`/rest/<store_code>/V1/...`). Under `/rest/all/V1/...` that is the admin website, which has no stock, so `ready` is `false` there. For that, the handler for the mode must be installed (with MSI, that's the companion package), the MSI modules must be enabled, and the website must be assigned to a stock.
+- `ready` tells you whether stock registration actually works for the website of the store view in the request URL (`/rest/<store_code>/V1/...`). For that, the handler for the mode must be installed (with MSI, that's the companion package). With MSI, the MSI modules must also be enabled, and the website must be assigned to a stock. Under `/rest/all/V1/...` the website is the admin website, which has no stock, so with MSI `ready` is `false` there.
 - `problem` names what's missing when `ready` is `false`. When `ready` is `true`, the field isn't in the response.
 
 The route requires the ACL resource `Hyva_InventoryOrderReservation::capabilities`.

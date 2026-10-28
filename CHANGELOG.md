@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 ### Fixed
+* Without Inventory, a line deducted past zero is taken off the stock row's quantity as read under the lock `registerProductsSale` took, not off a stock item the registry may have cached earlier in the process; a product type without quantity is left alone there, as `registerProductsSale` leaves it.
 * Without Inventory, the price index is refreshed for the products whose stock status the registration changed, as the checkout does (`ReindexQuoteInventoryObserver`).
 
 ## 0.1.0 (2026-10-28)

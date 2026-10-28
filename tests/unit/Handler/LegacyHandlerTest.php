@@ -14,10 +14,12 @@ use Hyva\InventoryOrderReservation\Model\Obligation;
 use Magento\Catalog\Model\Indexer\Product\Price\Processor as PriceIndexerProcessor;
 use Magento\Catalog\Model\ResourceModel\Product as ProductResource;
 use Magento\CatalogInventory\Api\Data\StockItemInterface;
+use Magento\CatalogInventory\Api\StockConfigurationInterface;
 use Magento\CatalogInventory\Api\StockManagementInterface;
 use Magento\CatalogInventory\Model\StockManagement;
 use Magento\CatalogInventory\Api\StockRegistryInterface;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
+use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
 use Magento\CatalogInventory\Model\Spi\StockStateProviderInterface;
 use Magento\CatalogInventory\Model\StockStateException;
 use Magento\Sales\Api\Data\OrderInterface;
@@ -46,20 +48,31 @@ class LegacyHandlerTest extends TestCase
         ]);
     }
 
-    public function test_a_sold_out_line_is_deducted_past_zero(): void
+    public function test_a_sold_out_line_is_deducted_past_zero_from_the_locked_quantity(): void
     {
         $management = $this->management();
         $management->method('registerProductsSale')->willThrowException(new StockStateException(__('Some of the products are out of stock.')));
         $stockItem = $this->createMock(StockItemInterface::class);
         $stockItem->method('getItemId')->willReturn(5);
         $stockItem->method('getManageStock')->willReturn(true);
-        $stockItem->method('getQty')->willReturn(0.0);
+        // the registry's copy is stale; the locked row holds the real quantity
+        $stockItem->method('getQty')->willReturn(7.0);
         $stockItem->expects(self::once())->method('setQty')->with(-2.0);
         $stockItem->expects(self::once())->method('setIsInStock')->with(false);
         $registry = $this->createMock(StockRegistryInterface::class);
-        $registry->method('getStockItem')->with(100, 1)->willReturn($stockItem);
+        $registry->method('getStockItem')->with(100, 0)->willReturn($stockItem);
         $registry->expects(self::once())->method('updateStockItemBySku')->with('mug', $stockItem);
-        $handler = $this->handler($management, $this->createMock(ProductResource::class), $registry);
+        $handler = $this->handler($management, $this->createMock(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'simple']]);
+        $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
+    }
+
+    public function test_a_type_without_quantity_is_not_deducted_past_zero(): void
+    {
+        $management = $this->management();
+        $management->method('registerProductsSale')->willThrowException(new StockStateException(__('Some of the products are out of stock.')));
+        $registry = $this->createMock(StockRegistryInterface::class);
+        $registry->expects(self::never())->method('updateStockItemBySku');
+        $handler = $this->handler($management, $this->createMock(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'not-qty']]);
         $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
     }
 
@@ -102,13 +115,20 @@ class LegacyHandlerTest extends TestCase
         StockManagementInterface $management,
         ProductResource $products,
         StockRegistryInterface $registry,
-        ?PriceIndexerProcessor $prices = null
+        ?PriceIndexerProcessor $prices = null,
+        array $locked = []
     ): LegacyHandler {
         $state = $this->createMock(StockStateProviderInterface::class);
         $state->method('verifyStock')->willReturn(false);
         $indexer = $this->getMockBuilder(StockIndexerProcessor::class)->disableOriginalConstructor()->onlyMethods(['reindexList'])->getMock();
 
-        return new LegacyHandler($management, $products, $indexer, $registry, $state, $prices ?? $this->priceIndexer());
+        $stockResource = $this->createMock(StockResource::class);
+        $stockResource->method('lockProductsStock')->willReturn($locked);
+        $configuration = $this->createMock(StockConfigurationInterface::class);
+        $configuration->method('getDefaultScopeId')->willReturn(0);
+        $configuration->method('isQty')->willReturnCallback(static fn (string $type): bool => $type === 'simple');
+
+        return new LegacyHandler($management, $products, $indexer, $registry, $state, $prices ?? $this->priceIndexer(), $stockResource, $configuration);
     }
 
     private function priceIndexer(): PriceIndexerProcessor

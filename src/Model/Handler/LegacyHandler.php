@@ -19,6 +19,7 @@ use Magento\CatalogInventory\Model\StockStateException;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
 use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
 use Magento\CatalogInventory\Model\StockManagement;
+use Magento\CatalogInventory\Model\StockRegistryStorage;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Api\Data\OrderInterface;
 
@@ -39,7 +40,8 @@ class LegacyHandler implements HandlerInterface
         private readonly StockRegistryInterface $stockRegistry,
         private readonly StockStateProviderInterface $stockStateProvider,
         private readonly StockResource $stockResource,
-        private readonly StockConfigurationInterface $stockConfiguration
+        private readonly StockConfigurationInterface $stockConfiguration,
+        private readonly StockRegistryStorage $stockRegistryStorage
     ) {
     }
 
@@ -126,8 +128,10 @@ class LegacyHandler implements HandlerInterface
      *
      * The quantity comes from the stock rows, read under the lock
      * `registerProductsSale` took on them in this transaction, as that
-     * method reads it: a stock item the registry cached earlier in the
-     * process (a cron run registers many orders) may be out of date.
+     * method reads it, and the stock item is loaded afresh, as that method
+     * loads it: one the registry cached earlier in the process (a cron run
+     * registers many orders) may be out of date, and its save writes every
+     * field it holds.
      *
      * @param array<int, float> $qtyByProduct
      * @param array<int, string> $skuByProduct
@@ -141,6 +145,7 @@ class LegacyHandler implements HandlerInterface
             if (!isset($row['qty']) || !$this->stockConfiguration->isQty((string) ($row['type_id'] ?? ''))) {
                 continue;
             }
+            $this->stockRegistryStorage->removeStockItem($productId);
             $stockItem = $this->stockRegistry->getStockItem($productId, $scopeId);
             if (!$stockItem->getItemId() || !$stockItem->getManageStock()) {
                 continue;

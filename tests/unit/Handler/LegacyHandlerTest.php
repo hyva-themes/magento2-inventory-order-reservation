@@ -20,6 +20,7 @@ use Magento\CatalogInventory\Api\StockRegistryInterface;
 use Magento\CatalogInventory\Model\Indexer\Stock\Processor as StockIndexerProcessor;
 use Magento\CatalogInventory\Model\ResourceModel\Stock as StockResource;
 use Magento\CatalogInventory\Model\Spi\StockStateProviderInterface;
+use Magento\CatalogInventory\Model\StockRegistryStorage;
 use Magento\CatalogInventory\Model\StockStateException;
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Store\Api\Data\StoreInterface;
@@ -61,7 +62,9 @@ class LegacyHandlerTest extends TestCase
         $registry = $this->createMock(StockRegistryInterface::class);
         $registry->method('getStockItem')->with(100, 0)->willReturn($stockItem);
         $registry->expects(self::once())->method('updateStockItemBySku')->with('mug', $stockItem);
-        $handler = $this->handler($management, $this->createStub(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'simple']]);
+        $storage = $this->createMock(StockRegistryStorage::class);
+        $storage->expects(self::once())->method('removeStockItem')->with(100);
+        $handler = $this->handler($management, $this->createStub(ProductResource::class), $registry, locked: [100 => ['product_id' => 100, 'qty' => '0.0000', 'type_id' => 'simple']], storage: $storage);
         $handler->register($this->order(), [new Obligation(9, 'mug', 'simple', 2.0, 1, null, Obligation::MODE_LEGACY, productId: 100)]);
     }
 
@@ -88,7 +91,8 @@ class LegacyHandlerTest extends TestCase
         StockManagementInterface $management,
         ProductResource $products,
         StockRegistryInterface $registry,
-        array $locked = []
+        array $locked = [],
+        ?StockRegistryStorage $storage = null
     ): LegacyHandler {
         $state = $this->createStub(StockStateProviderInterface::class);
         $state->method('verifyStock')->willReturn(false);
@@ -100,7 +104,7 @@ class LegacyHandlerTest extends TestCase
         $configuration->method('getDefaultScopeId')->willReturn(0);
         $configuration->method('isQty')->willReturnCallback(static fn (string $type): bool => $type === 'simple');
 
-        return new LegacyHandler($management, $products, $indexer, $registry, $state, $stockResource, $configuration);
+        return new LegacyHandler($management, $products, $indexer, $registry, $state, $stockResource, $configuration, $storage ?? $this->createStub(StockRegistryStorage::class));
     }
 
     private function order(): OrderInterface

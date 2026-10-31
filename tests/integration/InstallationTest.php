@@ -15,6 +15,8 @@ use Hyva\InventoryOrderReservation\Model\OwedMessage;
 use Hyva\InventoryOrderReservation\Model\Readiness;
 use Hyva\InventoryOrderReservation\Model\StockRegistration;
 
+// phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+
 /**
  * A missing handler package is an installation problem, not an order's
  * failure: orders sent with the flag are accepted and stay owed with no
@@ -62,6 +64,7 @@ class InstallationTest extends StoreCase
         $capabilities = self::$objectManager->create(CapabilitiesInterface::class, ['readiness' => $readiness])->get();
         self::assertFalse($capabilities->isReady());
         self::assertSame($problem, $capabilities->getProblem());
+        self::assertSame('handler_missing', $capabilities->getProblemCode());
         /** @var OwedMessage $message */
         $message = self::$objectManager->create(OwedMessage::class, ['readiness' => $readiness]);
         self::assertTrue($message->isDisplayed(), 'named at once, not after an hour');
@@ -69,7 +72,9 @@ class InstallationTest extends StoreCase
 
         // as installed: ready, and the first registration completes the order
         self::assertTrue(self::$objectManager->get(Readiness::class)->isReady($this->websiteId()));
-        self::assertTrue(self::$objectManager->get(CapabilitiesInterface::class)->get()->isReady());
+        $ready = self::$objectManager->get(CapabilitiesInterface::class)->get();
+        self::assertTrue($ready->isReady());
+        self::assertNull($ready->getProblemCode());
         self::assertTrue($this->register($orderId));
         self::assertSame('done', $this->obligationStatus($orderId));
     }

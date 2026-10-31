@@ -30,12 +30,13 @@ class CapabilitiesService implements CapabilitiesInterface
      */
     public function get(): Capabilities
     {
-        $problem = $this->readiness->problem((int) $this->storeManager->getStore()->getWebsiteId());
+        $diagnosis = $this->readiness->diagnosis((int) $this->storeManager->getStore()->getWebsiteId());
         return $this->capabilitiesFactory->create([
             'version' => $this->packageVersion->get(),
             'mode' => $this->inventory->mode(),
-            'ready' => $problem === null,
-            'problem' => $problem,
+            'ready' => $diagnosis === null,
+            'problem' => $diagnosis['problem'] ?? null,
+            'problemCode' => $diagnosis['code'] ?? null,
         ]);
     }
 }

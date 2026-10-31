@@ -20,6 +20,7 @@ interface CapabilitiesInterface
     public const ATTRIBUTE = 'attribute';
     public const READY = 'ready';
     public const PROBLEM = 'problem';
+    public const PROBLEM_CODE = 'problem_code';
 
     /**
      * The package's version as Composer installed it ("0.1.2", or "dev-main" for a branch install); "unknown" outside Composer.
@@ -50,4 +51,10 @@ interface CapabilitiesInterface
      * @return string|null
      */
     public function getProblem(): ?string;
+
+    /**
+     * What is missing, as a stable code beside the sentence: "inventory_modules_missing", "handler_missing" or "website_without_stock"; null when ready.
+     * @return string|null
+     */
+    public function getProblemCode(): ?string;
 }

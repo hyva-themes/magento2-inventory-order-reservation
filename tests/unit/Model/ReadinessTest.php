@@ -17,6 +17,8 @@ use Magento\Store\Api\Data\WebsiteInterface;
 use Magento\Store\Api\WebsiteRepositoryInterface;
 use PHPUnit\Framework\TestCase;
 
+// phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+
 class ReadinessTest extends TestCase
 {
     public function test_an_inventory_store_with_the_handler_package_and_a_stock_is_ready(): void
@@ -55,6 +57,30 @@ class ReadinessTest extends TestCase
         $readiness = $this->readiness(inventory: true, missing: [], handlers: ['inventory'], stockId: null);
         self::assertNull($readiness->problem(), 'the store as installed is fine');
         self::assertSame('Website "base" is assigned to no stock.', $readiness->problem(1));
+    }
+
+    public function test_each_problem_has_its_code_beside_the_sentence(): void
+    {
+        $modules = $this->readiness(inventory: true, missing: ['Magento_InventoryReservations'], handlers: ['inventory'], stockId: 2)->diagnosis(1);
+        $handler = $this->readiness(inventory: true, missing: [], handlers: ['legacy'], stockId: 2)->diagnosis(1);
+        $legacyHandler = $this->readiness(inventory: false, missing: [], handlers: [], stockId: null)->diagnosis(1);
+        $website = $this->readiness(inventory: true, missing: [], handlers: ['inventory'], stockId: null)->diagnosis(1);
+
+        self::assertSame(Readiness::PROBLEM_INVENTORY_MODULES_MISSING, $modules['code'] ?? null);
+        self::assertSame('inventory_modules_missing', Readiness::PROBLEM_INVENTORY_MODULES_MISSING);
+        self::assertSame(Readiness::PROBLEM_HANDLER_MISSING, $handler['code'] ?? null);
+        self::assertSame(Readiness::PROBLEM_HANDLER_MISSING, $legacyHandler['code'] ?? null);
+        self::assertSame('handler_missing', Readiness::PROBLEM_HANDLER_MISSING);
+        self::assertSame(Readiness::PROBLEM_WEBSITE_WITHOUT_STOCK, $website['code'] ?? null);
+        self::assertSame('website_without_stock', Readiness::PROBLEM_WEBSITE_WITHOUT_STOCK);
+        self::assertSame('Website "base" is assigned to no stock.', $website['problem'] ?? null);
+        self::assertSame('No stock registration handler for mode "legacy" is installed.', $legacyHandler['problem'] ?? null);
+    }
+
+    public function test_a_ready_store_has_no_diagnosis(): void
+    {
+        self::assertNull($this->readiness(inventory: true, missing: [], handlers: ['inventory'], stockId: 2)->diagnosis(1));
+        self::assertNull($this->readiness(inventory: false, missing: [], handlers: ['legacy'], stockId: null)->diagnosis(1));
     }
 
     /**

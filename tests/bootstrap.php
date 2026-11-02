@@ -33,3 +33,11 @@ if ($autoload === null) {
 $loader = require $autoload;
 $loader->addPsr4('Hyva\\InventoryOrderReservation\\', $moduleRoot . '/src/', true);
 $loader->addPsr4('Hyva\\InventoryOrderReservation\\Test\\Unit\\', $moduleRoot . '/tests/unit/', true);
+
+// Magento generates the data factories on demand; outside a store the
+// capabilities factory does not exist, so the mock generator gets a
+// declaration of the generated shape.
+if (!class_exists(\Hyva\InventoryOrderReservation\Model\Data\CapabilitiesFactory::class)) {
+    // phpcs:ignore Squiz.PHP.Eval.Discouraged, Magento2.Security.InsecureFunction.Found -- a static class skeleton, no input
+    eval('namespace Hyva\\InventoryOrderReservation\\Model\\Data; class CapabilitiesFactory { public function create(array $data = []) {} }');
+}

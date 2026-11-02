@@ -18,7 +18,8 @@ class Capabilities implements CapabilitiesInterface
         private readonly string $mode,
         private readonly string $attribute = 'reserve_stock',
         private readonly bool $ready = true,
-        private readonly ?string $problem = null
+        private readonly ?string $problem = null,
+        private readonly ?string $problemCode = null
     ) {
     }
 
@@ -57,5 +58,10 @@ class Capabilities implements CapabilitiesInterface
     public function getProblem(): ?string
     {
         return $this->problem;
+    }
+
+    public function getProblemCode(): ?string
+    {
+        return $this->problemCode;
     }
 }

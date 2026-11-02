@@ -40,6 +40,14 @@ GET /rest/V1/inventory/order-reservation
 - `mode` is `inventory` when `Magento_InventorySales` is enabled, and `legacy` otherwise.
 - `ready` tells you whether stock registration actually works for the website of the store view in the request URL (`/rest/<store_code>/V1/...`). For that, the handler for the mode must be installed (with MSI, that's the companion package). With MSI, the MSI modules must also be enabled, and the website must be assigned to a stock. Under `/rest/all/V1/...` the website is the admin website, which has no stock, so with MSI `ready` is `false` there.
 - `problem` names what's missing when `ready` is `false`. When `ready` is `true`, the field isn't in the response.
+- `problem_code` names the same thing as a stable code, for a client to act on instead of the sentence: `inventory_modules_missing` (MSI modules disabled or missing), `handler_missing` (no handler for the mode, with MSI the companion package), or `website_without_stock`. Like `problem`, it's only in the response when `ready` is `false`. A client talking to an older package that doesn't send it should treat a missing code as an unknown problem.
+
+A store whose website is assigned to no stock answers, for example:
+
+```http
+GET /rest/default/V1/inventory/order-reservation
+{"version": "0.1.1", "mode": "inventory", "attribute": "reserve_stock", "ready": false, "problem": "Website \"base\" is assigned to no stock.", "problem_code": "website_without_stock"}
+```
 
 The route requires the ACL resource `Hyva_InventoryOrderReservation::capabilities`.
 
